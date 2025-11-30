@@ -1,9 +1,9 @@
 package grpc
 
 import (
-	v1 "github.com/evrone/go-clean-template/internal/controller/grpc/v1"
-	"github.com/evrone/go-clean-template/internal/usecase"
-	"github.com/evrone/go-clean-template/pkg/logger"
+	v1 "pod-backend/internal/controller/grpc/v1"
+	"pod-backend/internal/usecase"
+	"pod-backend/pkg/logger"
 	pbgrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )

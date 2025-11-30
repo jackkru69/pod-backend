@@ -6,7 +6,8 @@ import (
 	"errors"
 	"net"
 
-	"github.com/evrone/go-clean-template/pkg/logger"
+	"pod-backend/pkg/logger"
+
 	"golang.org/x/sync/errgroup"
 	pbgrpc "google.golang.org/grpc"
 )

@@ -5,12 +5,12 @@ import (
 	"net/http"
 
 	"github.com/ansrivas/fiberprometheus/v2"
-	"github.com/evrone/go-clean-template/config"
-	_ "github.com/evrone/go-clean-template/docs" // Swagger docs.
-	"github.com/evrone/go-clean-template/internal/controller/http/middleware"
-	v1 "github.com/evrone/go-clean-template/internal/controller/http/v1"
-	"github.com/evrone/go-clean-template/internal/usecase"
-	"github.com/evrone/go-clean-template/pkg/logger"
+	"pod-backend/config"
+	_ "pod-backend/docs" // Swagger docs.
+	"pod-backend/internal/controller/http/middleware"
+	v1 "pod-backend/internal/controller/http/v1"
+	"pod-backend/internal/usecase"
+	"pod-backend/pkg/logger"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
 )

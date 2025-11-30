@@ -9,15 +9,16 @@ import (
 type (
 	// Config -.
 	Config struct {
-		App     App
-		HTTP    HTTP
-		Log     Log
-		PG      PG
-		GRPC    GRPC
-		RMQ     RMQ
-		NATS    NATS
-		Metrics Metrics
-		Swagger Swagger
+		App         App
+		HTTP        HTTP
+		Log         Log
+		PG          PG
+		GRPC        GRPC
+		RMQ         RMQ
+		NATS        NATS
+		Metrics     Metrics
+		Swagger     Swagger
+		GameBackend GameBackend
 	}
 
 	// App -.
@@ -69,6 +70,20 @@ type (
 	// Swagger -.
 	Swagger struct {
 		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
+	}
+
+	// GameBackend - Game backend specific configuration
+	GameBackend struct {
+		TONCenterV2URL        string `env:"TON_CENTER_V2_URL" envDefault:"http://localhost:8082"`
+		TONCenterV3WSURL      string `env:"TON_CENTER_V3_WS_URL" envDefault:"ws://localhost:8081/api/v3/websocket"`
+		TONGameContractAddr   string `env:"TON_GAME_CONTRACT_ADDRESS"`
+		HTTPPort              string `env:"GAME_BACKEND_HTTP_PORT" envDefault:"3000"`
+		Environment           string `env:"GAME_BACKEND_ENV" envDefault:"development"`
+		RateLimitRequests     int    `env:"RATE_LIMIT_REQUESTS" envDefault:"100"`
+		RateLimitWindow       string `env:"RATE_LIMIT_WINDOW" envDefault:"1m"`
+		CircuitBreakerMaxFail int    `env:"CIRCUIT_BREAKER_MAX_FAILURES" envDefault:"5"`
+		CircuitBreakerTimeout string `env:"CIRCUIT_BREAKER_TIMEOUT" envDefault:"60s"`
+		TelegramBotToken      string `env:"TELEGRAM_BOT_TOKEN"`
 	}
 )
 

@@ -3,8 +3,9 @@ package webapi
 import (
 	"fmt"
 
+	"pod-backend/internal/entity"
+
 	translator "github.com/Conight/go-googletrans"
-	"github.com/evrone/go-clean-template/internal/entity"
 )
 
 // TranslationWebAPI -.
