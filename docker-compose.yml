@@ -1,6 +1,5 @@
 version: "3.9"
 
-
 x-db-environment: &x-db-environment
   POSTGRES_SSL_MODE: "disable"
   POSTGRES_HOST: "db"
@@ -40,7 +39,6 @@ x-backend-app-environment: &x-backend-app-environment
   # Swagger
   SWAGGER_ENABLED: "true"
 
-
 services:
   db:
     container_name: db
@@ -50,7 +48,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "5433:5432"
     networks:
       app_network:
         aliases:
@@ -74,10 +72,11 @@ services:
   nats:
     container_name: nats
     image: nats:2.12-alpine
-    command: [ "-m", "8222", "-sd", "/nats-data", "-user", "guest", "-pass", "guest" ]
+    command:
+      ["-m", "8222", "-sd", "/nats-data", "-user", "guest", "-pass", "guest"]
     ports:
-      - "4222:4222"
-      - "8222:8222"
+      - "4223:4222"
+      - "8223:8222"
     volumes:
       - nats_data:/nats-data
     networks:
@@ -94,19 +93,19 @@ services:
     environment:
       <<: *x-backend-app-environment
     ports:
-      - "8080:8080"
-      - "8081:8081"
+      - "8090:8080"
+      - "8091:8081"
     depends_on:
       - db
       - rabbitmq
     deploy:
       resources:
         limits:
-          cpus: '1.00'
-          memory: '2Gb'
+          cpus: "1.00"
+          memory: "2Gb"
         reservations:
-          cpus: '0.60'
-          memory: '1Gb'
+          cpus: "0.60"
+          memory: "1Gb"
     networks:
       app_network:
         aliases:
@@ -127,11 +126,9 @@ services:
         aliases:
           - nginx.lvh.me
 
-
 networks:
   app_network:
     external: false
-
 
 volumes:
   db_data:
