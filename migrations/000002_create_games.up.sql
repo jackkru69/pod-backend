@@ -22,7 +22,7 @@ CREATE TABLE games (
     completed_at            TIMESTAMPTZ,
     init_tx_hash            VARCHAR(66) NOT NULL,
     join_tx_hash            VARCHAR(66),
-    reveal_tx_hash          VARCHAR(66),
+    reveal_tx_hash          TEXT,
     complete_tx_hash        VARCHAR(66)
 );
 

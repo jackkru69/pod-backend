@@ -39,6 +39,11 @@ type UserRepository interface {
 	// Used when a referred player completes a game.
 	IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error
 
+	// GetReferralStats retrieves referral statistics for a user (FR-021).
+	// Returns total_referrals count and total_referral_earnings in nanotons.
+	// Returns zero values if user doesn't exist.
+	GetReferralStats(ctx context.Context, walletAddress string) (totalReferrals int, totalEarnings int64, err error)
+
 	// DeleteOlderThan deletes users whose created_at is older than the specified duration.
 	// Used for data retention compliance (FR-017: 1 year retention).
 	// Returns number of users deleted.

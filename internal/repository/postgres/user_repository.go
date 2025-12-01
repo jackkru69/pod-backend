@@ -273,6 +273,27 @@ func (r *UserRepository) IncrementReferrals(ctx context.Context, walletAddress s
 	return nil
 }
 
+// GetReferralStats retrieves referral statistics for a user (FR-021).
+func (r *UserRepository) GetReferralStats(ctx context.Context, walletAddress string) (int, int64, error) {
+	sql, args, err := r.pg.Builder.
+		Select("total_referrals", "total_referral_earnings").
+		From("users").
+		Where("wallet_address = ?", walletAddress).
+		ToSql()
+	if err != nil {
+		return 0, 0, fmt.Errorf("build query: %w", err)
+	}
+
+	var totalReferrals int
+	var totalEarnings int64
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&totalReferrals, &totalEarnings)
+	if err != nil {
+		return 0, 0, fmt.Errorf("execute query: %w", err)
+	}
+
+	return totalReferrals, totalEarnings, nil
+}
+
 // DeleteOlderThan deletes users whose created_at is older than the specified date.
 func (r *UserRepository) DeleteOlderThan(ctx context.Context, olderThanDate string) (int64, error) {
 	sql, args, err := r.pg.Builder.

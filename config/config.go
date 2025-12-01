@@ -84,6 +84,7 @@ type (
 		CircuitBreakerMaxFail int    `env:"CIRCUIT_BREAKER_MAX_FAILURES" envDefault:"5"`
 		CircuitBreakerTimeout string `env:"CIRCUIT_BREAKER_TIMEOUT" envDefault:"60s"`
 		TelegramBotToken      string `env:"TELEGRAM_BOT_TOKEN"`
+		CORSAllowedOrigins    string `env:"CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3001"`
 	}
 )
 

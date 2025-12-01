@@ -15,7 +15,7 @@ import (
 // @Accept      json
 // @Produce     json
 // @Success     200 {object} entity.TranslationHistory
-// @Failure     500 {object} response.Error
+// @Failure     500 {object} v1.ErrorResponse
 // @Router      /translation/history [get]
 func (r *V1) history(ctx *fiber.Ctx) error {
 	translationHistory, err := r.t.History(ctx.UserContext())
@@ -36,8 +36,8 @@ func (r *V1) history(ctx *fiber.Ctx) error {
 // @Produce     json
 // @Param       request body request.Translate true "Set up translation"
 // @Success     200 {object} entity.Translation
-// @Failure     400 {object} response.Error
-// @Failure     500 {object} response.Error
+// @Failure     400 {object} v1.ErrorResponse
+// @Failure     500 {object} v1.ErrorResponse
 // @Router      /translation/do-translate [post]
 func (r *V1) doTranslate(ctx *fiber.Ctx) error {
 	var body request.Translate

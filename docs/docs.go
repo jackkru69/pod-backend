@@ -9,12 +9,162 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {},
+        "contact": {
+            "name": "POD Game Team"
+        },
+        "license": {
+            "name": "BUSL-1.1"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/games": {
+            "get": {
+                "description": "Retrieve list of games filtered by status with pagination support",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Get available games",
+                "parameters": [
+                    {
+                        "enum": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4
+                        ],
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Filter by game status (0-4)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum number of results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Number of results to skip",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "List of games",
+                        "schema": {
+                            "$ref": "#/definitions/rest.GameListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request parameters",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/{gameId}": {
+            "get": {
+                "description": "Retrieve detailed information for a specific game by ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Get game details",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Game details",
+                        "schema": {
+                            "$ref": "#/definitions/entity.Game"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid game ID",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Game not found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/health": {
+            "get": {
+                "description": "Returns service health status including database connectivity",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Health check endpoint",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "$ref": "#/definitions/rest.HealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service is unhealthy",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/translation/do-translate": {
             "post": {
                 "description": "Translate a text",
@@ -50,13 +200,13 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/response.Error"
+                            "$ref": "#/definitions/v1.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/response.Error"
+                            "$ref": "#/definitions/v1.ErrorResponse"
                         }
                     }
                 }
@@ -86,7 +236,7 @@ const docTemplate = `{
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/response.Error"
+                            "$ref": "#/definitions/v1.ErrorResponse"
                         }
                     }
                 }
@@ -94,6 +244,89 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "entity.Game": {
+            "type": "object",
+            "properties": {
+                "bet_amount": {
+                    "description": "nanotons",
+                    "type": "integer"
+                },
+                "complete_tx_hash": {
+                    "type": "string"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "fee_receiver_address": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "highest_bid_allowed": {
+                    "type": "integer"
+                },
+                "init_tx_hash": {
+                    "type": "string"
+                },
+                "join_tx_hash": {
+                    "type": "string"
+                },
+                "joined_at": {
+                    "type": "string"
+                },
+                "lowest_bid_allowed": {
+                    "type": "integer"
+                },
+                "payout_amount": {
+                    "type": "integer"
+                },
+                "player_one_address": {
+                    "type": "string"
+                },
+                "player_one_choice": {
+                    "description": "1=CLOSED, 2=HEADS, 3=TAILS",
+                    "type": "integer"
+                },
+                "player_one_referrer": {
+                    "type": "string"
+                },
+                "player_two_address": {
+                    "type": "string"
+                },
+                "player_two_choice": {
+                    "type": "integer"
+                },
+                "player_two_referrer": {
+                    "type": "string"
+                },
+                "referrer_fee_numerator": {
+                    "type": "integer"
+                },
+                "reveal_tx_hash": {
+                    "type": "string"
+                },
+                "revealed_at": {
+                    "type": "string"
+                },
+                "service_fee_numerator": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "0-4 (see constants above)",
+                    "type": "integer"
+                },
+                "waiting_timeout_seconds": {
+                    "type": "integer"
+                },
+                "winner_address": {
+                    "type": "string"
+                }
+            }
+        },
         "entity.Translation": {
             "type": "object",
             "properties": {
@@ -148,26 +381,103 @@ const docTemplate = `{
                 }
             }
         },
-        "response.Error": {
+        "rest.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.GameListResponse": {
+            "type": "object",
+            "properties": {
+                "games": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.Game"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "rest.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "enum": [
+                        "connected",
+                        "disconnected",
+                        "not_configured"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "healthy",
+                        "unhealthy"
+                    ]
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "ton_center_api": {
+                    "type": "string",
+                    "enum": [
+                        "connected",
+                        "disconnected",
+                        "circuit_breaker_open",
+                        "not_configured"
+                    ]
+                }
+            }
+        },
+        "v1.ErrorResponse": {
             "type": "object",
             "properties": {
                 "error": {
-                    "type": "string",
-                    "example": "message"
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "TelegramAuth": {
+            "description": "Telegram Mini App authentication via initData string",
+            "type": "apiKey",
+            "name": "X-Telegram-Init-Data",
+            "in": "header"
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
-	Host:             "localhost:8080",
-	BasePath:         "/v1",
-	Schemes:          []string{},
-	Title:            "Go Clean Template API",
-	Description:      "Using a translation service as an example",
+	Version:          "1.0.0",
+	Host:             "localhost:3000",
+	BasePath:         "/api/v1",
+	Schemes:          []string{"http", "https"},
+	Title:            "POD Game Backend API",
+	Description:      "Backend service for TON blockchain gambling game with real-time WebSocket updates",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

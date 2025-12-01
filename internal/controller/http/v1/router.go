@@ -1,11 +1,18 @@
 package v1
 
 import (
-	"pod-backend/internal/usecase"
-	"pod-backend/pkg/logger"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+
+	"pod-backend/internal/usecase"
+	"pod-backend/pkg/logger"
 )
+
+// ErrorResponse represents an error response for API v1
+type ErrorResponse struct {
+	Error   string `json:"error"`
+	Message string `json:"message"`
+}
 
 // NewTranslationRoutes -.
 func NewTranslationRoutes(apiV1Group fiber.Router, t usecase.Translation, l logger.Interface) {
