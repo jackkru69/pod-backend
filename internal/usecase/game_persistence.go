@@ -12,10 +12,12 @@ import (
 // GamePersistenceUseCase handles persisting blockchain game events to database.
 // Supports FR-001 (persist blockchain events), FR-008 (update game status),
 // FR-011 (validate blockchain data), FR-012 (store outcomes).
+// T093: Integrated with GameBroadcastUseCase for real-time WebSocket updates.
 type GamePersistenceUseCase struct {
-	gameRepo  repository.GameRepository
-	eventRepo repository.GameEventRepository
-	userRepo  repository.UserRepository
+	gameRepo        repository.GameRepository
+	eventRepo       repository.GameEventRepository
+	userRepo        repository.UserRepository
+	broadcastUC     *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -25,10 +27,17 @@ func NewGamePersistenceUseCase(
 	userRepo repository.UserRepository,
 ) *GamePersistenceUseCase {
 	return &GamePersistenceUseCase{
-		gameRepo:  gameRepo,
-		eventRepo: eventRepo,
-		userRepo:  userRepo,
+		gameRepo:    gameRepo,
+		eventRepo:   eventRepo,
+		userRepo:    userRepo,
+		broadcastUC: nil, // Set via SetBroadcastUseCase
 	}
+}
+
+// SetBroadcastUseCase sets the broadcast use case for real-time WebSocket updates (T093).
+// This is optional - if not set, persistence works without broadcasting.
+func (uc *GamePersistenceUseCase) SetBroadcastUseCase(broadcastUC *GameBroadcastUseCase) {
+	uc.broadcastUC = broadcastUC
 }
 
 // serializeEventData converts EventData to JSON string for Payload field.
@@ -47,6 +56,26 @@ func serializeEventData(event *entity.GameEvent) error {
 	}
 
 	return nil
+}
+
+// broadcastGameUpdate triggers WebSocket broadcast if broadcast use case is configured (T093).
+// Fetches the latest game state and broadcasts to all subscribers.
+func (uc *GamePersistenceUseCase) broadcastGameUpdate(ctx context.Context, gameID int64) {
+	if uc.broadcastUC == nil {
+		// Broadcasting not enabled
+		return
+	}
+
+	// Fetch latest game state
+	game, err := uc.gameRepo.GetByID(ctx, gameID)
+	if err != nil {
+		// Log error but don't fail the persistence operation
+		// Broadcast failure shouldn't break blockchain event processing
+		return
+	}
+
+	// Trigger broadcast (errors are logged inside BroadcastGameUpdate)
+	_ = uc.broadcastUC.BroadcastGameUpdate(ctx, game)
 }
 
 // HandleGameInitialized processes GameInitializedNotify event.
@@ -108,6 +137,9 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		return fmt.Errorf("failed to create game: %w", err)
 	}
 
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, gameID)
+
 	return nil
 }
 
@@ -143,6 +175,9 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
 		return fmt.Errorf("failed to join game: %w", err)
 	}
+
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, event.GameID)
 
 	return nil
 }
@@ -219,7 +254,29 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 				return fmt.Errorf("failed to increment losses: %w", err)
 			}
 		}
+
+		// Update referrer statistics (FR-020, FR-021, T091)
+		// Calculate referrer earnings based on bet amount and referrer fee
+		var referrerAddress *string
+		if game.PlayerOneAddress == winner && game.PlayerOneReferrer != nil {
+			referrerAddress = game.PlayerOneReferrer
+		} else if game.PlayerTwoAddress != nil && *game.PlayerTwoAddress == winner && game.PlayerTwoReferrer != nil {
+			referrerAddress = game.PlayerTwoReferrer
+		}
+
+		if referrerAddress != nil && *referrerAddress != "" {
+			// Calculate referrer earnings: (bet_amount * referrer_fee_numerator) / 10000
+			// referrer_fee_numerator is in basis points (1/10000)
+			referrerEarnings := (game.BetAmount * game.ReferrerFeeNumerator) / 10000
+
+			if err := uc.userRepo.IncrementReferrals(ctx, *referrerAddress, referrerEarnings); err != nil {
+				return fmt.Errorf("failed to update referrer stats: %w", err)
+			}
+		}
 	}
+
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, event.GameID)
 
 	return nil
 }
@@ -270,6 +327,9 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 		}
 	}
 
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, event.GameID)
+
 	return nil
 }
 
@@ -299,6 +359,9 @@ func (uc *GamePersistenceUseCase) HandleGameCancelled(ctx context.Context, event
 	if err := uc.gameRepo.CancelGame(ctx, event.GameID, event.TransactionHash); err != nil {
 		return fmt.Errorf("failed to cancel game: %w", err)
 	}
+
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, event.GameID)
 
 	return nil
 }
@@ -341,6 +404,9 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 		return fmt.Errorf("failed to reveal choice: %w", err)
 	}
 
+	// Broadcast game update to WebSocket subscribers (T093)
+	uc.broadcastGameUpdate(ctx, event.GameID)
+
 	return nil
 }
 
@@ -365,6 +431,9 @@ func (uc *GamePersistenceUseCase) HandleInsufficientBalance(ctx context.Context,
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
 	}
+
+	// Note: No broadcast for InsufficientBalance events as game state doesn't change
+	// This is an audit-only event
 
 	return nil
 }

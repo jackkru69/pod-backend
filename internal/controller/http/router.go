@@ -16,6 +16,7 @@ import (
 	"pod-backend/internal/controller/rest"
 	corsmw "pod-backend/internal/infrastructure/cors"
 	"pod-backend/internal/infrastructure/ratelimit"
+	"pod-backend/internal/infrastructure/telegram"
 	postgresrepo "pod-backend/internal/repository/postgres"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
@@ -81,11 +82,20 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 
 	// Initialize use cases
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
+	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
 
 	// Initialize handlers
 	gameHandler := rest.NewGameHandler(gameQueryUC, &zerologger)
+	userHandler := rest.NewUserHandler(userManagementUC, gameQueryUC, zerologger)
 	// TODO: Pass actual TON Center client when blockchain polling is integrated
 	healthHandler := rest.NewHealthHandler(pg.Pool, &zerologger, nil)
+
+	// Telegram auth middleware (optional for now - will be required when TMA is integrated)
+	// For now, user endpoints are accessible without authentication to enable testing
+	telegramAuth := telegram.OptionalAuthMiddleware(telegram.AuthConfig{
+		BotToken: cfg.GameBackend.TelegramBotToken,
+		MaxAge:   86400, // 24 hours
+	})
 
 	// API v1 routes
 	apiV1Group := app.Group("/api/v1")
@@ -97,10 +107,16 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 		apiV1Group.Get("/games", gameHandler.ListGames)
 		apiV1Group.Get("/games/:gameId", gameHandler.GetGameByID)
 
+		// User routes (FR-003: User profiles, FR-006: Game history, FR-021: Referral stats)
+		// Uses optional auth for now - will switch to required auth when TMA is ready
+		userRoutes := apiV1Group.Group("/users", telegramAuth)
+		{
+			userRoutes.Get("/:address", userHandler.GetUserProfile)
+			userRoutes.Get("/:address/history", userHandler.GetUserGameHistory)
+			userRoutes.Get("/:address/referrals", userHandler.GetReferralStats)
+		}
+
 		// Health route
 		apiV1Group.Get("/health", healthHandler.GetHealth)
 	}
-
-	// Suppress unused variable warnings (remove when used)
-	_ = userRepo
 }

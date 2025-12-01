@@ -180,3 +180,68 @@ func (m *MockUserRepository) DeleteOlderThan(ctx context.Context, olderThanDate 
 	args := m.Called(ctx, olderThanDate)
 	return args.Get(0).(int64), args.Error(1)
 }
+
+// MockGameEventRepository implements repository.GameEventRepository for testing
+type MockGameEventRepository struct {
+	mock.Mock
+}
+
+func (m *MockGameEventRepository) Create(ctx context.Context, event *entity.GameEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
+func (m *MockGameEventRepository) Upsert(ctx context.Context, event *entity.GameEvent) error {
+	args := m.Called(ctx, event)
+	return args.Error(0)
+}
+
+func (m *MockGameEventRepository) GetByGameID(ctx context.Context, gameID int64) ([]*entity.GameEvent, error) {
+	args := m.Called(ctx, gameID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.GameEvent), args.Error(1)
+}
+
+func (m *MockGameEventRepository) GetByTransactionHash(ctx context.Context, txHash string) (*entity.GameEvent, error) {
+	args := m.Called(ctx, txHash)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.GameEvent), args.Error(1)
+}
+
+func (m *MockGameEventRepository) GetByEventType(ctx context.Context, eventType string) ([]*entity.GameEvent, error) {
+	args := m.Called(ctx, eventType)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.GameEvent), args.Error(1)
+}
+
+func (m *MockGameEventRepository) GetByBlockRange(ctx context.Context, startBlock, endBlock int64) ([]*entity.GameEvent, error) {
+	args := m.Called(ctx, startBlock, endBlock)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.GameEvent), args.Error(1)
+}
+
+func (m *MockGameEventRepository) Exists(ctx context.Context, gameID int64, txHash string, eventType string) (bool, error) {
+	args := m.Called(ctx, gameID, txHash, eventType)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockGameEventRepository) ExistsByTxHash(ctx context.Context, txHash string) (bool, error) {
+	args := m.Called(ctx, txHash)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockGameEventRepository) GetLatestByGameID(ctx context.Context, gameID int64) (*entity.GameEvent, error) {
+	args := m.Called(ctx, gameID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.GameEvent), args.Error(1)
+}

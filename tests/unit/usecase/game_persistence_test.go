@@ -13,77 +13,10 @@ import (
 	"pod-backend/internal/usecase"
 )
 
-// Test mocks for game persistence tests
-
-type mockGameRepo struct {
-	mock.Mock
-}
-
-func (m *mockGameRepo) Create(ctx context.Context, game *entity.Game) error {
-	args := m.Called(ctx, game)
-	return args.Error(0)
-}
-
-func (m *mockGameRepo) GetByID(ctx context.Context, gameID int64) (*entity.Game, error) {
-	args := m.Called(ctx, gameID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*entity.Game), args.Error(1)
-}
-
-func (m *mockGameRepo) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string) error {
-	args := m.Called(ctx, gameID, playerTwoAddress, joinTxHash)
-	return args.Error(0)
-}
-
-func (m *mockGameRepo) CompleteGame(ctx context.Context, gameID int64, winner string, payout int64, finishTxHash string) error {
-	args := m.Called(ctx, gameID, winner, payout, finishTxHash)
-	return args.Error(0)
-}
-
-func (m *mockGameRepo) CancelGame(ctx context.Context, gameID int64, cancelTxHash string) error {
-	args := m.Called(ctx, gameID, cancelTxHash)
-	return args.Error(0)
-}
-
-func (m *mockGameRepo) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string) error {
-	args := m.Called(ctx, gameID, playerAddress, choice, revealTxHash)
-	return args.Error(0)
-}
-
-type mockEventRepo struct {
-	mock.Mock
-}
-
-func (m *mockEventRepo) Upsert(ctx context.Context, event *entity.GameEvent) error {
-	args := m.Called(ctx, event)
-	return args.Error(0)
-}
-
-type mockUserRepo struct {
-	mock.Mock
-}
-
-func (m *mockUserRepo) IncrementGamesPlayed(ctx context.Context, walletAddress string) error {
-	args := m.Called(ctx, walletAddress)
-	return args.Error(0)
-}
-
-func (m *mockUserRepo) IncrementWins(ctx context.Context, walletAddress string) error {
-	args := m.Called(ctx, walletAddress)
-	return args.Error(0)
-}
-
-func (m *mockUserRepo) IncrementLosses(ctx context.Context, walletAddress string) error {
-	args := m.Called(ctx, walletAddress)
-	return args.Error(0)
-}
-
 // TestHandleGameInitialized_Success tests successful game creation from blockchain event
 func TestHandleGameInitialized_Success(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
 
@@ -122,8 +55,8 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 
 // TestHandleGameInitialized_ValidationError tests validation of invalid event data
 func TestHandleGameInitialized_ValidationError(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
 
@@ -144,8 +77,8 @@ func TestHandleGameInitialized_ValidationError(t *testing.T) {
 
 // TestHandleGameInitialized_RepositoryError tests database error handling
 func TestHandleGameInitialized_RepositoryError(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
 
@@ -176,8 +109,8 @@ func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 
 // TestHandleGameStarted_Success tests successful game update when player 2 joins
 func TestHandleGameStarted_Success(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
 
@@ -206,9 +139,9 @@ func TestHandleGameStarted_Success(t *testing.T) {
 
 // TestHandleGameFinished_Success tests successful game completion with winner
 func TestHandleGameFinished_Success(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
-	mockUserRepo := new(mockUserRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
@@ -258,9 +191,9 @@ func TestHandleGameFinished_Success(t *testing.T) {
 
 // TestHandleDraw_Success tests successful draw handling
 func TestHandleDraw_Success(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
-	mockUserRepo := new(mockUserRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
@@ -305,8 +238,8 @@ func TestHandleDraw_Success(t *testing.T) {
 
 // TestDuplicateEvent_Idempotent tests that duplicate events are handled idempotently at DB level
 func TestDuplicateEvent_Idempotent(t *testing.T) {
-	mockGameRepo := new(mockGameRepo)
-	mockEventRepo := new(mockEventRepo)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
 
@@ -342,4 +275,65 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
+}
+
+// TestHandleGameFinished_WithReferrer tests referral statistics update (T091, FR-020, FR-021)
+func TestHandleGameFinished_WithReferrer(t *testing.T) {
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
+
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
+
+	winnerAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	loserAddress := "EQAnotherPlayerWalletAddress123456789012345678"
+	referrerAddress := "EQReferrerWalletAddress123456789012345678901234"
+	loserPtr := loserAddress
+	referrerPtr := referrerAddress
+
+	// Mock game with referrer for winner
+	existingGame := &entity.Game{
+		GameID:               123,
+		PlayerOneAddress:     winnerAddress,
+		PlayerOneReferrer:    &referrerPtr, // Winner has a referrer
+		PlayerTwoAddress:     &loserPtr,
+		BetAmount:            1000000000,   // 1 TON
+		ReferrerFeeNumerator: 50,           // 0.5% = 50 basis points
+		Status:               entity.GameStatusWaitingForOpenBids,
+	}
+	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
+
+	event := &entity.GameEvent{
+		EventType:       entity.EventTypeGameFinished,
+		GameID:          123,
+		TransactionHash: "tx_finish_123",
+		BlockNumber:     1002,
+		Timestamp:       time.Now(),
+		EventData: map[string]interface{}{
+			"game_id": int64(123),
+			"winner":  winnerAddress,
+			"payout":  int64(1900000000),
+		},
+	}
+
+	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123").Return(nil)
+
+	// Expect user statistics updates
+	mockUserRepo.On("IncrementGamesPlayed", mock.Anything, winnerAddress).Return(nil)
+	mockUserRepo.On("IncrementGamesPlayed", mock.Anything, loserAddress).Return(nil)
+	mockUserRepo.On("IncrementWins", mock.Anything, winnerAddress).Return(nil)
+	mockUserRepo.On("IncrementLosses", mock.Anything, loserAddress).Return(nil)
+
+	// Expect referrer statistics update (T091)
+	// Expected earnings: (1000000000 * 50) / 10000 = 5000000 nanotons = 0.005 TON
+	expectedReferrerEarnings := int64(5000000)
+	mockUserRepo.On("IncrementReferrals", mock.Anything, referrerAddress, expectedReferrerEarnings).Return(nil)
+
+	err := uc.HandleGameFinished(context.Background(), event)
+
+	assert.NoError(t, err)
+	mockEventRepo.AssertExpectations(t)
+	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
 }

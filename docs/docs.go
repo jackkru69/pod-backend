@@ -9,7 +9,12 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {},
+        "contact": {
+            "name": "POD Game Team"
+        },
+        "license": {
+            "name": "BUSL-1.1"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -65,19 +70,19 @@ const docTemplate = `{
                     "200": {
                         "description": "List of games",
                         "schema": {
-                            "$ref": "#/definitions/rest.GameListResponse"
+                            "$ref": "#/definitions/internal_controller_rest.GameListResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid request parameters",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -110,25 +115,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Game details",
                         "schema": {
-                            "$ref": "#/definitions/entity.Game"
+                            "$ref": "#/definitions/pod-backend_internal_entity.Game"
                         }
                     },
                     "400": {
                         "description": "Invalid game ID",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "Game not found",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -148,13 +153,13 @@ const docTemplate = `{
                     "200": {
                         "description": "Service is healthy",
                         "schema": {
-                            "$ref": "#/definitions/rest.HealthResponse"
+                            "$ref": "#/definitions/internal_controller_rest.HealthResponse"
                         }
                     },
                     "503": {
                         "description": "Service is unhealthy",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -187,25 +192,25 @@ const docTemplate = `{
                     "200": {
                         "description": "User profile with statistics",
                         "schema": {
-                            "$ref": "#/definitions/entity.User"
+                            "$ref": "#/definitions/pod-backend_internal_entity.User"
                         }
                     },
                     "400": {
                         "description": "Invalid wallet address format",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -252,25 +257,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Paginated game history",
                         "schema": {
-                            "$ref": "#/definitions/rest.GameHistoryResponse"
+                            "$ref": "#/definitions/internal_controller_rest.GameHistoryResponse"
                         }
                     },
                     "400": {
                         "description": "Invalid query parameters",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -303,25 +308,25 @@ const docTemplate = `{
                     "200": {
                         "description": "Referral statistics",
                         "schema": {
-                            "$ref": "#/definitions/entity.ReferralStats"
+                            "$ref": "#/definitions/pod-backend_internal_entity.ReferralStats"
                         }
                     },
                     "400": {
                         "description": "Invalid wallet address format",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "404": {
                         "description": "User not found",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
-                            "$ref": "#/definitions/rest.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_rest.ErrorResponse"
                         }
                     }
                 }
@@ -348,7 +353,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/request.Translate"
+                            "$ref": "#/definitions/pod-backend_internal_controller_http_v1_request.Translate"
                         }
                     }
                 ],
@@ -356,19 +361,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/entity.Translation"
+                            "$ref": "#/definitions/pod-backend_internal_entity.Translation"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/v1.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_http_v1.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/v1.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_http_v1.ErrorResponse"
                         }
                     }
                 }
@@ -392,13 +397,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/entity.TranslationHistory"
+                            "$ref": "#/definitions/pod-backend_internal_entity.TranslationHistory"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/v1.ErrorResponse"
+                            "$ref": "#/definitions/internal_controller_http_v1.ErrorResponse"
                         }
                     }
                 }
@@ -406,7 +411,131 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "entity.Game": {
+        "internal_controller_http_v1.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_controller_rest.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "error": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_controller_rest.GameHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "games": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pod-backend_internal_entity.Game"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_controller_rest.GameListResponse": {
+            "type": "object",
+            "properties": {
+                "games": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/pod-backend_internal_entity.Game"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "internal_controller_rest.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "database": {
+                    "type": "string",
+                    "enum": [
+                        "connected",
+                        "disconnected",
+                        "not_configured"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "healthy",
+                        "degraded",
+                        "unhealthy"
+                    ]
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "ton_center_api": {
+                    "type": "string",
+                    "enum": [
+                        "connected",
+                        "recovering",
+                        "circuit_breaker_open",
+                        "not_configured"
+                    ]
+                }
+            }
+        },
+        "pod-backend_internal_controller_http_v1_request.Translate": {
+            "type": "object",
+            "required": [
+                "destination",
+                "original",
+                "source"
+            ],
+            "properties": {
+                "destination": {
+                    "type": "string",
+                    "example": "en"
+                },
+                "original": {
+                    "type": "string",
+                    "example": "текст для перевода"
+                },
+                "source": {
+                    "type": "string",
+                    "example": "auto"
+                }
+            }
+        },
+        "pod-backend_internal_entity.Game": {
             "type": "object",
             "properties": {
                 "bet_amount": {
@@ -489,7 +618,7 @@ const docTemplate = `{
                 }
             }
         },
-        "entity.ReferralStats": {
+        "pod-backend_internal_entity.ReferralStats": {
             "type": "object",
             "properties": {
                 "games_referred": {
@@ -509,7 +638,7 @@ const docTemplate = `{
                 }
             }
         },
-        "entity.Translation": {
+        "pod-backend_internal_entity.Translation": {
             "type": "object",
             "properties": {
                 "destination": {
@@ -530,18 +659,18 @@ const docTemplate = `{
                 }
             }
         },
-        "entity.TranslationHistory": {
+        "pod-backend_internal_entity.TranslationHistory": {
             "type": "object",
             "properties": {
                 "history": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/entity.Translation"
+                        "$ref": "#/definitions/pod-backend_internal_entity.Translation"
                     }
                 }
             }
         },
-        "entity.User": {
+        "pod-backend_internal_entity.User": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -579,141 +708,26 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
-        },
-        "request.Translate": {
-            "type": "object",
-            "required": [
-                "destination",
-                "original",
-                "source"
-            ],
-            "properties": {
-                "destination": {
-                    "type": "string",
-                    "example": "en"
-                },
-                "original": {
-                    "type": "string",
-                    "example": "текст для перевода"
-                },
-                "source": {
-                    "type": "string",
-                    "example": "auto"
-                }
-            }
-        },
-        "rest.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "details": {
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "error": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "rest.GameHistoryResponse": {
-            "type": "object",
-            "properties": {
-                "games": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.Game"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                },
-                "wallet_address": {
-                    "type": "string"
-                }
-            }
-        },
-        "rest.GameListResponse": {
-            "type": "object",
-            "properties": {
-                "games": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/entity.Game"
-                    }
-                },
-                "limit": {
-                    "type": "integer"
-                },
-                "offset": {
-                    "type": "integer"
-                },
-                "total": {
-                    "type": "integer"
-                }
-            }
-        },
-        "rest.HealthResponse": {
-            "type": "object",
-            "properties": {
-                "database": {
-                    "type": "string",
-                    "enum": [
-                        "connected",
-                        "disconnected",
-                        "not_configured"
-                    ]
-                },
-                "status": {
-                    "type": "string",
-                    "enum": [
-                        "healthy",
-                        "unhealthy"
-                    ]
-                },
-                "timestamp": {
-                    "type": "string"
-                },
-                "ton_center_api": {
-                    "type": "string",
-                    "enum": [
-                        "connected",
-                        "disconnected",
-                        "circuit_breaker_open",
-                        "not_configured"
-                    ]
-                }
-            }
-        },
-        "v1.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
+        }
+    },
+    "securityDefinitions": {
+        "TelegramAuth": {
+            "description": "Telegram Mini App authentication via initData string",
+            "type": "apiKey",
+            "name": "X-Telegram-Init-Data",
+            "in": "header"
         }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
-	Host:             "",
-	BasePath:         "",
-	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Version:          "1.0.0",
+	Host:             "localhost:3000",
+	BasePath:         "/api/v1",
+	Schemes:          []string{"http", "https"},
+	Title:            "POD Game Backend API",
+	Description:      "Backend service for TON blockchain gambling game with real-time WebSocket updates",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
