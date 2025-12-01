@@ -15,6 +15,7 @@ import (
 	v1 "pod-backend/internal/controller/http/v1"
 	"pod-backend/internal/controller/rest"
 	corsmw "pod-backend/internal/infrastructure/cors"
+	"pod-backend/internal/infrastructure/ratelimit"
 	postgresrepo "pod-backend/internal/repository/postgres"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
@@ -42,6 +43,9 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 	// Create zerolog logger
 	zerologger := zerolog.New(nil).Level(zerolog.InfoLevel)
 
+	// Register custom validators (FR-011, T107)
+	middleware.RegisterCustomValidators()
+
 	// CORS middleware (must be applied BEFORE routes)
 	corsConfig := corsmw.Config{
 		AllowedOrigins: cfg.GameBackend.CORSAllowedOrigins,
@@ -51,6 +55,10 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 	// Options
 	app.Use(middleware.Logger(l))
 	app.Use(middleware.Recovery(l))
+
+	// Rate limiting (FR-018: 100 req/min per user)
+	// Skips /health, /metrics, /swagger automatically
+	app.Use(ratelimit.New())
 
 	// Prometheus metrics
 	if cfg.Metrics.Enabled {
@@ -76,7 +84,8 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 
 	// Initialize handlers
 	gameHandler := rest.NewGameHandler(gameQueryUC, &zerologger)
-	healthHandler := rest.NewHealthHandler(pg.Pool, &zerologger)
+	// TODO: Pass actual TON Center client when blockchain polling is integrated
+	healthHandler := rest.NewHealthHandler(pg.Pool, &zerologger, nil)
 
 	// API v1 routes
 	apiV1Group := app.Group("/api/v1")

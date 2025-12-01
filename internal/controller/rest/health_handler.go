@@ -7,19 +7,24 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
+	"github.com/sony/gobreaker"
+
+	"pod-backend/internal/infrastructure/toncenter"
 )
 
 // HealthHandler handles health check requests
 type HealthHandler struct {
-	db     *pgxpool.Pool
-	logger *zerolog.Logger
+	db            *pgxpool.Pool
+	logger        *zerolog.Logger
+	tonCenterClient *toncenter.Client
 }
 
 // NewHealthHandler creates a new HealthHandler
-func NewHealthHandler(db *pgxpool.Pool, logger *zerolog.Logger) *HealthHandler {
+func NewHealthHandler(db *pgxpool.Pool, logger *zerolog.Logger, tonCenterClient *toncenter.Client) *HealthHandler {
 	return &HealthHandler{
-		db:     db,
-		logger: logger,
+		db:              db,
+		logger:          logger,
+		tonCenterClient: tonCenterClient,
 	}
 }
 
@@ -54,13 +59,26 @@ func (h *HealthHandler) GetHealth(c *fiber.Ctx) error {
 		response.Database = "not_configured"
 	}
 
-	// TODO: Check TON Center API when implemented
-	// For now, assume it's not configured
-	response.TonCenterAPI = "not_configured"
+	// Check TON Center API circuit breaker state (T104, FR-019)
+	if h.tonCenterClient != nil {
+		cbState := h.tonCenterClient.GetCircuitBreakerState()
+		switch cbState {
+		case gobreaker.StateClosed:
+			response.TonCenterAPI = "connected"
+		case gobreaker.StateOpen:
+			response.TonCenterAPI = "circuit_breaker_open"
+			response.Status = "degraded" // Service is partially available
+		case gobreaker.StateHalfOpen:
+			response.TonCenterAPI = "recovering"
+		}
+	} else {
+		response.TonCenterAPI = "not_configured"
+	}
 
 	h.logger.Debug().
 		Str("status", response.Status).
 		Str("database", response.Database).
+		Str("ton_center_api", response.TonCenterAPI).
 		Msg("Health check completed")
 
 	return c.JSON(response)
@@ -68,8 +86,8 @@ func (h *HealthHandler) GetHealth(c *fiber.Ctx) error {
 
 // HealthResponse represents the health check response
 type HealthResponse struct {
-	Status       string    `json:"status" enums:"healthy,unhealthy"`
+	Status       string    `json:"status" enums:"healthy,degraded,unhealthy"`
 	Timestamp    time.Time `json:"timestamp"`
 	Database     string    `json:"database,omitempty" enums:"connected,disconnected,not_configured"`
-	TonCenterAPI string    `json:"ton_center_api,omitempty" enums:"connected,disconnected,circuit_breaker_open,not_configured"`
+	TonCenterAPI string    `json:"ton_center_api,omitempty" enums:"connected,recovering,circuit_breaker_open,not_configured"`
 }

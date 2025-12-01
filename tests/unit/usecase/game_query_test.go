@@ -7,93 +7,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
-
-// MockGameRepository is a mock implementation of repository.GameRepository
-type MockGameRepository struct {
-	mock.Mock
-}
-
-func (m *MockGameRepository) Create(ctx context.Context, game *entity.Game) error {
-	args := m.Called(ctx, game)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) GetByID(ctx context.Context, gameID int64) (*entity.Game, error) {
-	args := m.Called(ctx, gameID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*entity.Game), args.Error(1)
-}
-
-func (m *MockGameRepository) GetByStatus(ctx context.Context, status int) ([]*entity.Game, error) {
-	args := m.Called(ctx, status)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*entity.Game), args.Error(1)
-}
-
-func (m *MockGameRepository) GetAvailableGames(ctx context.Context) ([]*entity.Game, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*entity.Game), args.Error(1)
-}
-
-func (m *MockGameRepository) GetByPlayerAddress(ctx context.Context, walletAddress string) ([]*entity.Game, error) {
-	args := m.Called(ctx, walletAddress)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*entity.Game), args.Error(1)
-}
-
-func (m *MockGameRepository) Update(ctx context.Context, game *entity.Game) error {
-	args := m.Called(ctx, game)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) UpdateStatus(ctx context.Context, gameID int64, newStatus int) error {
-	args := m.Called(ctx, gameID, newStatus)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string) error {
-	args := m.Called(ctx, gameID, playerTwoAddress, joinTxHash)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string) error {
-	args := m.Called(ctx, gameID, playerAddress, choice, revealTxHash)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error {
-	args := m.Called(ctx, gameID, winnerAddress, payoutAmount, completeTxHash)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) CancelGame(ctx context.Context, gameID int64, cancelTxHash string) error {
-	args := m.Called(ctx, gameID, cancelTxHash)
-	return args.Error(0)
-}
-
-func (m *MockGameRepository) DeleteOlderThan(ctx context.Context, olderThanDate string) (int64, error) {
-	args := m.Called(ctx, olderThanDate)
-	return args.Get(0).(int64), args.Error(1)
-}
-
-func (m *MockGameRepository) Exists(ctx context.Context, gameID int64) (bool, error) {
-	args := m.Called(ctx, gameID)
-	return args.Bool(0), args.Error(1)
-}
 
 // TestGameQueryUseCase_ListGames tests the ListGames method
 func TestGameQueryUseCase_ListGames(t *testing.T) {

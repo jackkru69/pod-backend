@@ -12,6 +12,10 @@ const (
 	MinPollInterval = 5 * time.Second  // When active
 	MaxPollInterval = 30 * time.Second // When idle
 	PollBatchSize   = 100              // Transactions per batch
+
+	// Exponential backoff for TON Center reconnection (T103, FR-019)
+	BackoffInitial = 1 * time.Second
+	BackoffMax     = 16 * time.Second
 )
 
 // EventHandler processes blockchain transactions.
@@ -23,13 +27,15 @@ type EventHandler interface {
 // Poller implements adaptive interval polling for blockchain events.
 // Decreases interval when activity detected, increases when idle.
 type Poller struct {
-	client           *Client
-	handler          EventHandler
-	logger           logger.Interface
-	currentInterval  time.Duration
+	client             *Client
+	handler            EventHandler
+	logger             logger.Interface
+	currentInterval    time.Duration
 	lastProcessedBlock int64
-	ticker           *time.Ticker
-	stopCh           chan struct{}
+	ticker             *time.Ticker
+	stopCh             chan struct{}
+	backoffDuration    time.Duration // Current exponential backoff duration (T103)
+	consecutiveErrors  int            // Count for exponential backoff
 }
 
 // NewPoller creates a new adaptive blockchain poller.
@@ -82,9 +88,13 @@ func (p *Poller) poll(ctx context.Context) {
 	txs, err := p.client.GetTransactions(ctx, p.lastProcessedBlock+1, PollBatchSize)
 	if err != nil {
 		p.logger.Error("Failed to fetch transactions", err)
-		p.adjustInterval(false) // Slow down on errors
+		p.handleError() // Exponential backoff (T103)
 		return
 	}
+
+	// Reset backoff on successful request
+	p.consecutiveErrors = 0
+	p.backoffDuration = BackoffInitial
 
 	if len(txs) == 0 {
 		p.logger.Debug("No new transactions")
@@ -109,6 +119,30 @@ func (p *Poller) poll(ctx context.Context) {
 
 	// Speed up when activity detected
 	p.adjustInterval(true)
+}
+
+// handleError implements exponential backoff for TON Center API errors (T103, FR-019).
+// Backoff sequence: 1s, 2s, 4s, 8s, 16s max as per research.md.
+func (p *Poller) handleError() {
+	p.consecutiveErrors++
+
+	if p.backoffDuration == 0 {
+		p.backoffDuration = BackoffInitial
+	} else {
+		// Double the backoff duration
+		p.backoffDuration = p.backoffDuration * 2
+		if p.backoffDuration > BackoffMax {
+			p.backoffDuration = BackoffMax
+		}
+	}
+
+	p.logger.Warn("TON Center API error (attempt %d), backing off for %v", p.consecutiveErrors, p.backoffDuration)
+
+	// Wait for backoff duration
+	time.Sleep(p.backoffDuration)
+
+	// Also slow down polling interval
+	p.adjustInterval(false)
 }
 
 // adjustInterval adjusts polling interval based on activity.
