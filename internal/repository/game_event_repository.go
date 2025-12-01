@@ -13,15 +13,20 @@ type GameEventRepository interface {
 	// Returns error if duplicate event detected (same game_id, transaction_hash, event_type).
 	Create(ctx context.Context, event *entity.GameEvent) error
 
+	// Upsert creates a new game event or ignores if already exists (idempotent operation).
+	// Uses transaction_hash as unique constraint for duplicate detection.
+	// Implements ON CONFLICT DO NOTHING for idempotency.
+	Upsert(ctx context.Context, event *entity.GameEvent) error
+
 	// GetByGameID retrieves all events for a specific game.
 	// Events are returned in chronological order (by timestamp).
 	// Returns empty slice if no events found.
 	GetByGameID(ctx context.Context, gameID int64) ([]*entity.GameEvent, error)
 
-	// GetByTransactionHash retrieves all events associated with a transaction.
+	// GetByTransactionHash retrieves the event by transaction hash.
 	// Used for duplicate detection and debugging.
-	// Returns empty slice if no events found.
-	GetByTransactionHash(ctx context.Context, txHash string) ([]*entity.GameEvent, error)
+	// Returns nil if not found.
+	GetByTransactionHash(ctx context.Context, txHash string) (*entity.GameEvent, error)
 
 	// GetByEventType retrieves all events of a specific type.
 	// Event type must be one of: GameInitializedNotify, GameStartedNotify,
@@ -38,6 +43,10 @@ type GameEventRepository interface {
 	// Exists checks if an event already exists for a given game, transaction, and type.
 	// Used for duplicate detection (SC-009).
 	Exists(ctx context.Context, gameID int64, txHash string, eventType string) (bool, error)
+
+	// ExistsByTxHash checks if an event with the given transaction hash already exists.
+	// Simpler version used for duplicate detection before processing.
+	ExistsByTxHash(ctx context.Context, txHash string) (bool, error)
 
 	// GetLatestByGameID retrieves the most recent event for a specific game.
 	// Returns nil if no events found.

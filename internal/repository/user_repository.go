@@ -13,9 +13,16 @@ type UserRepository interface {
 	// Returns error if wallet_address already exists.
 	Create(ctx context.Context, user *entity.User) error
 
+	// CreateOrUpdate creates a new user or updates existing one (upsert operation).
+	// Used for automatic user profile creation from Telegram auth (FR-003).
+	CreateOrUpdate(ctx context.Context, user *entity.User) error
+
 	// GetByWalletAddress retrieves a user by their wallet address.
 	// Returns nil if not found.
 	GetByWalletAddress(ctx context.Context, walletAddress string) (*entity.User, error)
+
+	// GetByWallet is an alias for GetByWalletAddress for cleaner use case code.
+	GetByWallet(ctx context.Context, walletAddress string) (*entity.User, error)
 
 	// GetByTelegramUserID retrieves all users associated with a Telegram user ID.
 	// A single Telegram user can have multiple wallet addresses.
@@ -40,9 +47,9 @@ type UserRepository interface {
 	IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error
 
 	// GetReferralStats retrieves referral statistics for a user (FR-021).
-	// Returns total_referrals count and total_referral_earnings in nanotons.
+	// Returns aggregated referral metrics including total referrals, earnings, and games referred.
 	// Returns zero values if user doesn't exist.
-	GetReferralStats(ctx context.Context, walletAddress string) (totalReferrals int, totalEarnings int64, err error)
+	GetReferralStats(ctx context.Context, walletAddress string) (*entity.ReferralStats, error)
 
 	// DeleteOlderThan deletes users whose created_at is older than the specified duration.
 	// Used for data retention compliance (FR-017: 1 year retention).

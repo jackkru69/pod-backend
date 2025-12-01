@@ -9,12 +9,7 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {
-            "name": "POD Game Team"
-        },
-        "license": {
-            "name": "BUSL-1.1"
-        },
+        "contact": {},
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -158,6 +153,173 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service is unhealthy",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{address}": {
+            "get": {
+                "description": "Retrieve user profile information including statistics (total games, wins, losses)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get user profile",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2\"",
+                        "description": "TON wallet address (EQ...)",
+                        "name": "address",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "User profile with statistics",
+                        "schema": {
+                            "$ref": "#/definitions/entity.User"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid wallet address format",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{address}/history": {
+            "get": {
+                "description": "Retrieve paginated list of games where the user participated (as player 1 or player 2)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get user game history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2\"",
+                        "description": "TON wallet address (EQ...)",
+                        "name": "address",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Number of games to return (default: 20, max: 100)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Offset for pagination (default: 0)",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Paginated game history",
+                        "schema": {
+                            "$ref": "#/definitions/rest.GameHistoryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid query parameters",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/users/{address}/referrals": {
+            "get": {
+                "description": "Retrieve aggregated referral statistics including total referrals, total earnings, and games referred",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get referral statistics",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2\"",
+                        "description": "TON wallet address (EQ...)",
+                        "name": "address",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Referral statistics",
+                        "schema": {
+                            "$ref": "#/definitions/entity.ReferralStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid wallet address format",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/rest.ErrorResponse"
                         }
@@ -327,6 +489,26 @@ const docTemplate = `{
                 }
             }
         },
+        "entity.ReferralStats": {
+            "type": "object",
+            "properties": {
+                "games_referred": {
+                    "description": "Total games where this wallet was referrer",
+                    "type": "integer"
+                },
+                "total_referral_earnings": {
+                    "description": "Total earnings in nanotons",
+                    "type": "integer"
+                },
+                "total_referrals": {
+                    "description": "Total unique referrals made by this wallet",
+                    "type": "integer"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
         "entity.Translation": {
             "type": "object",
             "properties": {
@@ -356,6 +538,45 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/entity.Translation"
                     }
+                }
+            }
+        },
+        "entity.User": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "telegram_user_id": {
+                    "type": "integer"
+                },
+                "telegram_username": {
+                    "type": "string"
+                },
+                "total_games_played": {
+                    "type": "integer"
+                },
+                "total_losses": {
+                    "type": "integer"
+                },
+                "total_referral_earnings": {
+                    "description": "nanotons",
+                    "type": "integer"
+                },
+                "total_referrals": {
+                    "type": "integer"
+                },
+                "total_wins": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
                 }
             }
         },
@@ -392,6 +613,29 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.GameHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "games": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.Game"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "wallet_address": {
                     "type": "string"
                 }
             }
@@ -459,25 +703,17 @@ const docTemplate = `{
                 }
             }
         }
-    },
-    "securityDefinitions": {
-        "TelegramAuth": {
-            "description": "Telegram Mini App authentication via initData string",
-            "type": "apiKey",
-            "name": "X-Telegram-Init-Data",
-            "in": "header"
-        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0.0",
-	Host:             "localhost:3000",
-	BasePath:         "/api/v1",
-	Schemes:          []string{"http", "https"},
-	Title:            "POD Game Backend API",
-	Description:      "Backend service for TON blockchain gambling game with real-time WebSocket updates",
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
+	Schemes:          []string{},
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

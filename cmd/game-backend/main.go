@@ -74,11 +74,13 @@ func main() {
 
 	// Initialize repositories
 	gameRepo := repopg.NewGameRepository(pg)
+	userRepo := repopg.NewUserRepository(pg)
 	_ = gameRepo // Will be used for queries
 
 	// Initialize use cases
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
 	gameBroadcastUC := usecase.NewGameBroadcastUseCase()
+	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -124,6 +126,12 @@ func main() {
 	gameHandler := rest.NewGameHandler(gameQueryUC, &log.Logger)
 	apiV1.Get("/games", gameHandler.ListGames)
 	apiV1.Get("/games/:gameId", gameHandler.GetGameByID)
+
+	// User endpoints (T074)
+	userHandler := rest.NewUserHandler(userManagementUC, gameQueryUC, log.Logger)
+	apiV1.Get("/users/:address", userHandler.GetUserProfile)
+	apiV1.Get("/users/:address/history", userHandler.GetUserGameHistory)
+	apiV1.Get("/users/:address/referrals", userHandler.GetReferralStats)
 
 	// WebSocket routes (T058)
 	wsHandler := websocketctrl.NewGameWebSocketHandler(gameRepo, gameBroadcastUC)

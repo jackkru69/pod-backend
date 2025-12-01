@@ -33,6 +33,9 @@ type GameRepository interface {
 	// Returns empty slice if no games found.
 	GetByPlayerAddress(ctx context.Context, walletAddress string) ([]*entity.Game, error)
 
+	// GetByPlayer is an alias for GetByPlayerAddress for cleaner use case code.
+	GetByPlayer(ctx context.Context, walletAddress string) ([]*entity.Game, error)
+
 	// Update updates an existing game record.
 	// Returns error if game doesn't exist.
 	Update(ctx context.Context, game *entity.Game) error

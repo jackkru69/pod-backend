@@ -61,3 +61,12 @@ func (u *User) Validate() error {
 
 	return nil
 }
+
+// ReferralStats represents aggregated referral statistics for a user's wallet address.
+// Supports FR-021 requirement to expose referral metrics.
+type ReferralStats struct {
+	WalletAddress        string `json:"wallet_address"`
+	TotalReferrals       int64  `json:"total_referrals"`        // Total unique referrals made by this wallet
+	TotalReferralEarnings int64  `json:"total_referral_earnings"` // Total earnings in nanotons
+	GamesReferred        int64  `json:"games_referred"`         // Total games where this wallet was referrer
+}

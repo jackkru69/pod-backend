@@ -1,4 +1,3 @@
-basePath: /api/v1
 definitions:
   entity.Game:
     properties:
@@ -56,6 +55,20 @@ definitions:
       winner_address:
         type: string
     type: object
+  entity.ReferralStats:
+    properties:
+      games_referred:
+        description: Total games where this wallet was referrer
+        type: integer
+      total_referral_earnings:
+        description: Total earnings in nanotons
+        type: integer
+      total_referrals:
+        description: Total unique referrals made by this wallet
+        type: integer
+      wallet_address:
+        type: string
+    type: object
   entity.Translation:
     properties:
       destination:
@@ -77,6 +90,32 @@ definitions:
         items:
           $ref: '#/definitions/entity.Translation'
         type: array
+    type: object
+  entity.User:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      telegram_user_id:
+        type: integer
+      telegram_username:
+        type: string
+      total_games_played:
+        type: integer
+      total_losses:
+        type: integer
+      total_referral_earnings:
+        description: nanotons
+        type: integer
+      total_referrals:
+        type: integer
+      total_wins:
+        type: integer
+      updated_at:
+        type: string
+      wallet_address:
+        type: string
     type: object
   request.Translate:
     properties:
@@ -102,6 +141,21 @@ definitions:
       error:
         type: string
       message:
+        type: string
+    type: object
+  rest.GameHistoryResponse:
+    properties:
+      games:
+        items:
+          $ref: '#/definitions/entity.Game'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+      wallet_address:
         type: string
     type: object
   rest.GameListResponse:
@@ -147,16 +201,8 @@ definitions:
       message:
         type: string
     type: object
-host: localhost:3000
 info:
-  contact:
-    name: POD Game Team
-  description: Backend service for TON blockchain gambling game with real-time WebSocket
-    updates
-  license:
-    name: BUSL-1.1
-  title: POD Game Backend API
-  version: 1.0.0
+  contact: {}
 paths:
   /api/v1/games:
     get:
@@ -257,6 +303,121 @@ paths:
       summary: Health check endpoint
       tags:
       - health
+  /api/v1/users/{address}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve user profile information including statistics (total games,
+        wins, losses)
+      parameters:
+      - description: TON wallet address (EQ...)
+        example: '"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"'
+        in: path
+        name: address
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User profile with statistics
+          schema:
+            $ref: '#/definitions/entity.User'
+        "400":
+          description: Invalid wallet address format
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get user profile
+      tags:
+      - users
+  /api/v1/users/{address}/history:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve paginated list of games where the user participated (as
+        player 1 or player 2)
+      parameters:
+      - description: TON wallet address (EQ...)
+        example: '"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"'
+        in: path
+        name: address
+        required: true
+        type: string
+      - default: 20
+        description: 'Number of games to return (default: 20, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 'Offset for pagination (default: 0)'
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Paginated game history
+          schema:
+            $ref: '#/definitions/rest.GameHistoryResponse'
+        "400":
+          description: Invalid query parameters
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get user game history
+      tags:
+      - users
+  /api/v1/users/{address}/referrals:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve aggregated referral statistics including total referrals,
+        total earnings, and games referred
+      parameters:
+      - description: TON wallet address (EQ...)
+        example: '"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"'
+        in: path
+        name: address
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Referral statistics
+          schema:
+            $ref: '#/definitions/entity.ReferralStats'
+        "400":
+          description: Invalid wallet address format
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get referral statistics
+      tags:
+      - users
   /translation/do-translate:
     post:
       consumes:
@@ -308,13 +469,4 @@ paths:
       summary: Show history
       tags:
       - translation
-schemes:
-- http
-- https
-securityDefinitions:
-  TelegramAuth:
-    description: Telegram Mini App authentication via initData string
-    in: header
-    name: X-Telegram-Init-Data
-    type: apiKey
 swagger: "2.0"

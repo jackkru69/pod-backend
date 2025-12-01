@@ -71,3 +71,41 @@ func (uc *GameQueryUseCase) GetGameByID(ctx context.Context, gameID int64) (*ent
 
 	return game, nil
 }
+
+// GetGamesByPlayer retrieves games where the specified wallet address is a participant.
+// Supports FR-006 requirement to expose user game history.
+// Returns games paginated by limit and offset.
+func (uc *GameQueryUseCase) GetGamesByPlayer(ctx context.Context, walletAddress string, limit int, offset int) ([]*entity.Game, error) {
+	// Validate wallet address
+	if walletAddress == "" {
+		return nil, errors.New("wallet address is required")
+	}
+
+	// Validate limit
+	if limit <= 0 {
+		return nil, errors.New("limit must be positive")
+	}
+
+	// Validate offset
+	if offset < 0 {
+		return nil, errors.New("offset cannot be negative")
+	}
+
+	// Get games from repository
+	games, err := uc.gameRepo.GetByPlayer(ctx, walletAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply pagination
+	if offset >= len(games) {
+		return []*entity.Game{}, nil
+	}
+
+	end := offset + limit
+	if end > len(games) {
+		end = len(games)
+	}
+
+	return games[offset:end], nil
+}

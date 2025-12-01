@@ -184,6 +184,11 @@ func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress s
 	return r.queryGames(ctx, sql, args...)
 }
 
+// GetByPlayer is an alias for GetByPlayerAddress for cleaner use case code.
+func (r *GameRepository) GetByPlayer(ctx context.Context, walletAddress string) ([]*entity.Game, error) {
+	return r.GetByPlayerAddress(ctx, walletAddress)
+}
+
 // queryGames is a helper to execute queries returning multiple games.
 func (r *GameRepository) queryGames(ctx context.Context, sql string, args ...interface{}) ([]*entity.Game, error) {
 	rows, err := r.pg.Pool.Query(ctx, sql, args...)

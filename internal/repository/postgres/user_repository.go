@@ -68,6 +68,57 @@ func (r *UserRepository) Create(ctx context.Context, user *entity.User) error {
 	return nil
 }
 
+// CreateOrUpdate creates a new user or updates existing one (upsert operation).
+// Used for automatic user profile creation from Telegram auth (FR-003).
+func (r *UserRepository) CreateOrUpdate(ctx context.Context, user *entity.User) error {
+	if err := user.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	sql, args, err := r.pg.Builder.
+		Insert("users").
+		Columns(
+			"telegram_user_id",
+			"telegram_username",
+			"wallet_address",
+			"total_games_played",
+			"total_wins",
+			"total_losses",
+			"total_referrals",
+			"total_referral_earnings",
+		).
+		Values(
+			user.TelegramUserID,
+			user.TelegramUsername,
+			user.WalletAddress,
+			user.TotalGamesPlayed,
+			user.TotalWins,
+			user.TotalLosses,
+			user.TotalReferrals,
+			user.TotalReferralEarnings,
+		).
+		Suffix(`ON CONFLICT (wallet_address) DO UPDATE SET
+			telegram_user_id = EXCLUDED.telegram_user_id,
+			telegram_username = EXCLUDED.telegram_username,
+			updated_at = NOW()
+			RETURNING id, created_at, updated_at`).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(
+		&user.ID,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("execute query: %w", err)
+	}
+
+	return nil
+}
+
 // GetByWalletAddress retrieves a user by their wallet address.
 func (r *UserRepository) GetByWalletAddress(ctx context.Context, walletAddress string) (*entity.User, error) {
 	sql, args, err := r.pg.Builder.
@@ -110,6 +161,11 @@ func (r *UserRepository) GetByWalletAddress(ctx context.Context, walletAddress s
 	}
 
 	return user, nil
+}
+
+// GetByWallet is an alias for GetByWalletAddress for cleaner use case code.
+func (r *UserRepository) GetByWallet(ctx context.Context, walletAddress string) (*entity.User, error) {
+	return r.GetByWalletAddress(ctx, walletAddress)
 }
 
 // GetByTelegramUserID retrieves all users associated with a Telegram user ID.
@@ -274,24 +330,53 @@ func (r *UserRepository) IncrementReferrals(ctx context.Context, walletAddress s
 }
 
 // GetReferralStats retrieves referral statistics for a user (FR-021).
-func (r *UserRepository) GetReferralStats(ctx context.Context, walletAddress string) (int, int64, error) {
-	sql, args, err := r.pg.Builder.
+// Returns aggregated referral metrics including total referrals, earnings, and games referred.
+func (r *UserRepository) GetReferralStats(ctx context.Context, walletAddress string) (*entity.ReferralStats, error) {
+	// Query user stats from users table
+	userSQL, userArgs, err := r.pg.Builder.
 		Select("total_referrals", "total_referral_earnings").
 		From("users").
 		Where("wallet_address = ?", walletAddress).
 		ToSql()
 	if err != nil {
-		return 0, 0, fmt.Errorf("build query: %w", err)
+		return nil, fmt.Errorf("build user query: %w", err)
+	}
+
+	stats := &entity.ReferralStats{
+		WalletAddress: walletAddress,
 	}
 
 	var totalReferrals int
 	var totalEarnings int64
-	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&totalReferrals, &totalEarnings)
+	err = r.pg.Pool.QueryRow(ctx, userSQL, userArgs...).Scan(&totalReferrals, &totalEarnings)
 	if err != nil {
-		return 0, 0, fmt.Errorf("execute query: %w", err)
+		// If user doesn't exist, return zero stats
+		return stats, nil
 	}
 
-	return totalReferrals, totalEarnings, nil
+	stats.TotalReferrals = int64(totalReferrals)
+	stats.TotalReferralEarnings = totalEarnings
+
+	// Count games where this wallet was a referrer
+	gamesSQL, gamesArgs, err := r.pg.Builder.
+		Select("COUNT(*)").
+		From("games").
+		Where("player_one_referrer = ? OR player_two_referrer = ?", walletAddress, walletAddress).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build games query: %w", err)
+	}
+
+	var gamesReferred int64
+	err = r.pg.Pool.QueryRow(ctx, gamesSQL, gamesArgs...).Scan(&gamesReferred)
+	if err != nil {
+		// If query fails, set to 0
+		gamesReferred = 0
+	}
+
+	stats.GamesReferred = gamesReferred
+
+	return stats, nil
 }
 
 // DeleteOlderThan deletes users whose created_at is older than the specified date.

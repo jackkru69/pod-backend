@@ -60,6 +60,46 @@ func (r *GameEventRepository) Create(ctx context.Context, event *entity.GameEven
 	return nil
 }
 
+// Upsert creates a new game event or ignores if already exists (idempotent operation).
+func (r *GameEventRepository) Upsert(ctx context.Context, event *entity.GameEvent) error {
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	sql, args, err := r.pg.Builder.
+		Insert("game_events").
+		Columns(
+			"game_id",
+			"event_type",
+			"transaction_hash",
+			"block_number",
+			"timestamp",
+			"payload",
+		).
+		Values(
+			event.GameID,
+			event.EventType,
+			event.TransactionHash,
+			event.BlockNumber,
+			event.Timestamp,
+			event.Payload,
+		).
+		Suffix("ON CONFLICT (transaction_hash) DO NOTHING RETURNING id, created_at").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+
+	// QueryRow will return no rows if ON CONFLICT DO NOTHING triggered (duplicate)
+	// This is expected and not an error
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&event.ID, &event.CreatedAt)
+	if err != nil && err.Error() != "no rows in result set" {
+		return fmt.Errorf("execute query: %w", err)
+	}
+
+	return nil
+}
+
 // GetByGameID retrieves all events for a specific game.
 func (r *GameEventRepository) GetByGameID(ctx context.Context, gameID int64) ([]*entity.GameEvent, error) {
 	sql, args, err := r.pg.Builder.
@@ -84,8 +124,8 @@ func (r *GameEventRepository) GetByGameID(ctx context.Context, gameID int64) ([]
 	return r.queryEvents(ctx, sql, args...)
 }
 
-// GetByTransactionHash retrieves all events associated with a transaction.
-func (r *GameEventRepository) GetByTransactionHash(ctx context.Context, txHash string) ([]*entity.GameEvent, error) {
+// GetByTransactionHash retrieves the event by transaction hash.
+func (r *GameEventRepository) GetByTransactionHash(ctx context.Context, txHash string) (*entity.GameEvent, error) {
 	sql, args, err := r.pg.Builder.
 		Select(
 			"id",
@@ -99,13 +139,28 @@ func (r *GameEventRepository) GetByTransactionHash(ctx context.Context, txHash s
 		).
 		From("game_events").
 		Where("transaction_hash = ?", txHash).
-		OrderBy("timestamp ASC").
+		Limit(1).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
 
-	return r.queryEvents(ctx, sql, args...)
+	event := &entity.GameEvent{}
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(
+		&event.ID,
+		&event.GameID,
+		&event.EventType,
+		&event.TransactionHash,
+		&event.BlockNumber,
+		&event.Timestamp,
+		&event.Payload,
+		&event.CreatedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("execute query: %w", err)
+	}
+
+	return event, nil
 }
 
 // GetByEventType retrieves all events of a specific type.
@@ -192,6 +247,26 @@ func (r *GameEventRepository) Exists(ctx context.Context, gameID int64, txHash s
 		Select("COUNT(*)").
 		From("game_events").
 		Where("game_id = ? AND transaction_hash = ? AND event_type = ?", gameID, txHash, eventType).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build query: %w", err)
+	}
+
+	var count int
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("execute query: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// ExistsByTxHash checks if an event with the given transaction hash already exists.
+func (r *GameEventRepository) ExistsByTxHash(ctx context.Context, txHash string) (bool, error) {
+	sql, args, err := r.pg.Builder.
+		Select("COUNT(*)").
+		From("game_events").
+		Where("transaction_hash = ?", txHash).
 		ToSql()
 	if err != nil {
 		return false, fmt.Errorf("build query: %w", err)
