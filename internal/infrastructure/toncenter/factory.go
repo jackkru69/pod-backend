@@ -31,11 +31,11 @@ type FactoryConfig struct {
 	HTTPTimeout           time.Duration
 
 	// WebSocket Configuration
-	V3WSURL           string
-	EnableWebSocket   bool
-	EventSourceType   string // "websocket" or "http"
-	MaxReconnect      int
-	PingInterval      time.Duration
+	V3WSURL         string
+	EnableWebSocket bool
+	EventSourceType string // "websocket" or "http"
+	MaxReconnect    int
+	PingInterval    time.Duration
 
 	// Callbacks
 	OnFallback func() // Called when fallback from WebSocket to HTTP occurs

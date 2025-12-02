@@ -112,7 +112,7 @@ func FinishedGame() *entity.Game {
 		PlayerOneChoice:       1,
 		PlayerTwoChoice:       intPtr(2),
 		WinnerAddress:         strPtr("0:abc123def456789012345678901234567890123456789012345678901234567890"),
-		BetAmount:             3000000000,              // 3 TON
+		BetAmount:             3000000000,           // 3 TON
 		PayoutAmount:          int64Ptr(5700000000), // 5.7 TON (after fees)
 		ServiceFeeNumerator:   500,
 		ReferrerFeeNumerator:  100,

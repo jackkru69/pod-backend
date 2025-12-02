@@ -39,7 +39,7 @@ type WebSocketClient struct {
 	connMu           sync.RWMutex
 	isConnected      atomic.Bool
 	subscribed       atomic.Bool
-	stopped          atomic.Bool  // Guard against double Stop()
+	stopped          atomic.Bool // Guard against double Stop()
 	subscriptionID   string
 	handler          EventHandler
 	stopCh           chan struct{}

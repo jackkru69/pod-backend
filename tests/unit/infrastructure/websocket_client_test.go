@@ -85,12 +85,12 @@ func (h *mockEventHandler) HandleTransaction(ctx context.Context, tx toncenter.T
 	h.mu.Lock()
 	h.transactions = append(h.transactions, tx)
 	h.mu.Unlock()
-	
+
 	select {
 	case h.txChan <- tx:
 	default:
 	}
-	
+
 	return nil
 }
 
@@ -447,7 +447,7 @@ func TestWebSocketClient_MaxReconnectAttempts(t *testing.T) {
 
 	err := client.Connect(ctx)
 	// Connect may fail immediately or trigger fallback
-	
+
 	// If connect succeeded somehow, start the loop to trigger reconnection
 	if err == nil {
 		go client.Start(ctx)
@@ -534,4 +534,3 @@ func TestWebSocketClient_ConnectionState(t *testing.T) {
 
 // Ensure mockLogger satisfies logger.Interface
 var _ logger.Interface = (*mockLogger)(nil)
-

@@ -1,18 +1,18 @@
 package usecase_test
 
 import (
-"context"
-"encoding/json"
-"sync/atomic"
-"testing"
-"time"
+	"context"
+	"encoding/json"
+	"sync/atomic"
+	"testing"
+	"time"
 
-"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/assert"
 
-"pod-backend/internal/entity"
-"pod-backend/internal/infrastructure/toncenter"
-"pod-backend/internal/usecase"
-"pod-backend/pkg/logger"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/infrastructure/toncenter"
+	"pod-backend/internal/usecase"
+	"pod-backend/pkg/logger"
 )
 
 // mockEventSource implements toncenter.EventSource for testing
@@ -127,20 +127,20 @@ func TestBlockchainSubscriberUseCase_ParseTransaction_Valid(t *testing.T) {
 	mockSource := newMockEventSource()
 
 	// Create a minimal persistence UC (won't be called in this test)
-// We're testing only the parsing logic
-uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	// We're testing only the parsing logic
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
-// Create test transaction with valid GameInitialized event
-tx := createTestTransaction(entity.EventTypeGameInitialized, 1)
+	// Create test transaction with valid GameInitialized event
+	tx := createTestTransaction(entity.EventTypeGameInitialized, 1)
 
-// Note: We cannot directly test parseTransaction as it's private
-// Instead, we test it through HandleTransaction and expect parse success
-// but persistence failure (since we passed nil persistence UC)
-ctx := context.Background()
+	// Note: We cannot directly test parseTransaction as it's private
+	// Instead, we test it through HandleTransaction and expect parse success
+	// but persistence failure (since we passed nil persistence UC)
+	ctx := context.Background()
 
-// Act - this will parse successfully but panic at routing (nil persistenceUC)
-// We use a recover to catch the panic and verify it's not a parse error
-func() {
+	// Act - this will parse successfully but panic at routing (nil persistenceUC)
+	// We use a recover to catch the panic and verify it's not a parse error
+	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				// Expected panic from nil persistence UC
@@ -308,7 +308,7 @@ func TestBlockchainSubscriberUseCase_SetMetrics(t *testing.T) {
 	// are registered globally and would conflict with other tests or main application.
 	// Instead, we just verify that SetMetrics doesn't panic and the method exists.
 
-// Act & Assert - just verify SetMetrics method exists and doesn't panic with nil
+	// Act & Assert - just verify SetMetrics method exists and doesn't panic with nil
 	uc.SetMetrics(nil)
 
 	// Verify the method exists by calling it - this tests the API surface
@@ -416,39 +416,39 @@ func TestBlockchainSubscriberUseCase_Lifecycle(t *testing.T) {
 	}
 
 	// Verify SetLastProcessedBlock doesn't change anything (ignored for TON)
-uc.SetLastProcessedBlock(100)
-assert.Equal(t, int64(0), uc.GetLastProcessedBlock())
+	uc.SetLastProcessedBlock(100)
+	assert.Equal(t, int64(0), uc.GetLastProcessedBlock())
 }
 
 // TestBlockchainSubscriberUseCase_GetLastProcessedLt tests lt tracking
 func TestBlockchainSubscriberUseCase_GetLastProcessedLt(t *testing.T) {
-// Arrange
-mockLogger := logger.New("debug")
-mockSource := newMockEventSource()
+	// Arrange
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
 
-uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
-// Set lt via mock event source
-mockSource.SetLastProcessedLt("12345678")
+	// Set lt via mock event source
+	mockSource.SetLastProcessedLt("12345678")
 
-// Act
-lt := uc.GetLastProcessedLt()
+	// Act
+	lt := uc.GetLastProcessedLt()
 
-// Assert
-assert.Equal(t, "12345678", lt)
+	// Assert
+	assert.Equal(t, "12345678", lt)
 }
 
 // TestBlockchainSubscriberUseCase_GetEventSourceType tests source type reporting
 func TestBlockchainSubscriberUseCase_GetEventSourceType(t *testing.T) {
-// Arrange
-mockLogger := logger.New("debug")
-mockSource := newMockEventSource()
+	// Arrange
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
 
-uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
-// Act
-sourceType := uc.GetSourceType()
+	// Act
+	sourceType := uc.GetSourceType()
 
-// Assert
-assert.Equal(t, toncenter.SourceTypeHTTP, sourceType)
+	// Assert
+	assert.Equal(t, toncenter.SourceTypeHTTP, sourceType)
 }

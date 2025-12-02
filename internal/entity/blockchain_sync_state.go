@@ -15,11 +15,11 @@ type BlockchainSyncState struct {
 	LastPollTimestamp  time.Time `json:"last_poll_timestamp"`  // When the last poll occurred
 	UpdatedAt          time.Time `json:"updated_at"`           // Auto-updated on changes
 	// WebSocket event streaming fields (Phase 10)
-	EventSourceType    string     `json:"event_source_type"`    // "websocket" or "http"
-	LastProcessedLt    string     `json:"last_processed_lt"`    // Last processed logical time (lt) for TON
-	WebSocketConnected bool       `json:"websocket_connected"`  // Whether WebSocket is currently connected
-	FallbackCount      int        `json:"fallback_count"`       // Number of fallback events
-	LastFallbackAt     *time.Time `json:"last_fallback_at"`     // When last fallback occurred
+	EventSourceType    string     `json:"event_source_type"`   // "websocket" or "http"
+	LastProcessedLt    string     `json:"last_processed_lt"`   // Last processed logical time (lt) for TON
+	WebSocketConnected bool       `json:"websocket_connected"` // Whether WebSocket is currently connected
+	FallbackCount      int        `json:"fallback_count"`      // Number of fallback events
+	LastFallbackAt     *time.Time `json:"last_fallback_at"`    // When last fallback occurred
 }
 
 // Validate validates the BlockchainSyncState entity.
