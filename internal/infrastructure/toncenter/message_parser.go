@@ -52,20 +52,20 @@ const (
 
 // ParsedMessage represents a parsed TON message from blockchain.
 type ParsedMessage struct {
-	Opcode       uint32
-	EventType    string
-	GameID       int64
-	PlayerOne    string
-	PlayerTwo    string
-	BidValue     *big.Int
+	Opcode        uint32
+	EventType     string
+	GameID        int64
+	PlayerOne     string
+	PlayerTwo     string
+	BidValue      *big.Int
 	TotalGainings *big.Int
-	Winner       string
-	Looser       string
-	Player       string
-	CoinSide     uint8
-	Required     *big.Int
-	Actual       *big.Int
-	RawData      []byte
+	Winner        string
+	Looser        string
+	Player        string
+	CoinSide      uint8
+	Required      *big.Int
+	Actual        *big.Int
+	RawData       []byte
 }
 
 // InMsgData represents the in_msg structure from TON Center API.
@@ -142,7 +142,7 @@ func (p *MessageParser) ParseInMsg(inMsgJSON json.RawMessage) (*ParsedMessage, e
 
 	// First 4 bytes are the opcode (big-endian)
 	opcode := binary.BigEndian.Uint32(messageData[:4])
-	
+
 	return p.parseMessageByOpcode(opcode, messageData[4:], messageData)
 }
 
@@ -226,9 +226,9 @@ func (p *MessageParser) parseMessageByOpcode(opcode uint32, data []byte, rawData
 // Structure: gameId: uint256, playerOne: Address, bidValue: coins
 func (p *MessageParser) parseGameInitializedNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeGameInitialized
-	
+
 	offset := 0
-	
+
 	// gameId: uint256 (32 bytes)
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("GameInitializedNotify: not enough data for gameId")
@@ -236,7 +236,7 @@ func (p *MessageParser) parseGameInitializedNotify(msg *ParsedMessage, data []by
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// playerOne: Address (267 bits = ~34 bytes in cell format)
 	// TON addresses are stored as: workchain (1 byte) + hash (32 bytes)
 	if len(data) < offset+33 {
@@ -248,14 +248,14 @@ func (p *MessageParser) parseGameInitializedNotify(msg *ParsedMessage, data []by
 	}
 	msg.PlayerOne = addr
 	offset += 33
-	
+
 	// bidValue: coins (VarUInt16 format, up to 16 bytes)
 	if len(data) > offset {
 		bidValue, bytesRead := p.parseCoins(data[offset:])
 		msg.BidValue = bidValue
 		offset += bytesRead
 	}
-	
+
 	return msg, nil
 }
 
@@ -263,9 +263,9 @@ func (p *MessageParser) parseGameInitializedNotify(msg *ParsedMessage, data []by
 // Structure: gameId: uint256, playerOne: Address, playerTwo: Address, totalGainings: coins
 func (p *MessageParser) parseGameStartedNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeGameStarted
-	
+
 	offset := 0
-	
+
 	// gameId: uint256 (32 bytes)
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("GameStartedNotify: not enough data for gameId")
@@ -273,7 +273,7 @@ func (p *MessageParser) parseGameStartedNotify(msg *ParsedMessage, data []byte) 
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// playerOne: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("GameStartedNotify: not enough data for playerOne")
@@ -284,7 +284,7 @@ func (p *MessageParser) parseGameStartedNotify(msg *ParsedMessage, data []byte) 
 	}
 	msg.PlayerOne = addr1
 	offset += 33
-	
+
 	// playerTwo: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("GameStartedNotify: not enough data for playerTwo")
@@ -295,13 +295,13 @@ func (p *MessageParser) parseGameStartedNotify(msg *ParsedMessage, data []byte) 
 	}
 	msg.PlayerTwo = addr2
 	offset += 33
-	
+
 	// totalGainings: coins
 	if len(data) > offset {
 		totalGainings, _ := p.parseCoins(data[offset:])
 		msg.TotalGainings = totalGainings
 	}
-	
+
 	return msg, nil
 }
 
@@ -309,9 +309,9 @@ func (p *MessageParser) parseGameStartedNotify(msg *ParsedMessage, data []byte) 
 // Structure: gameId: uint256, winner: Address, looser: Address, totalGainings: coins
 func (p *MessageParser) parseGameFinishedNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeGameFinished
-	
+
 	offset := 0
-	
+
 	// gameId: uint256
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("GameFinishedNotify: not enough data for gameId")
@@ -319,7 +319,7 @@ func (p *MessageParser) parseGameFinishedNotify(msg *ParsedMessage, data []byte)
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// winner: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("GameFinishedNotify: not enough data for winner")
@@ -330,7 +330,7 @@ func (p *MessageParser) parseGameFinishedNotify(msg *ParsedMessage, data []byte)
 	}
 	msg.Winner = winner
 	offset += 33
-	
+
 	// looser: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("GameFinishedNotify: not enough data for looser")
@@ -341,13 +341,13 @@ func (p *MessageParser) parseGameFinishedNotify(msg *ParsedMessage, data []byte)
 	}
 	msg.Looser = looser
 	offset += 33
-	
+
 	// totalGainings: coins
 	if len(data) > offset {
 		totalGainings, _ := p.parseCoins(data[offset:])
 		msg.TotalGainings = totalGainings
 	}
-	
+
 	return msg, nil
 }
 
@@ -355,9 +355,9 @@ func (p *MessageParser) parseGameFinishedNotify(msg *ParsedMessage, data []byte)
 // Structure: gameId: uint256, playerOne: Address
 func (p *MessageParser) parseGameCancelledNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeGameCancelled
-	
+
 	offset := 0
-	
+
 	// gameId: uint256
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("GameCancelledNotify: not enough data for gameId")
@@ -365,7 +365,7 @@ func (p *MessageParser) parseGameCancelledNotify(msg *ParsedMessage, data []byte
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// playerOne: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("GameCancelledNotify: not enough data for playerOne")
@@ -375,7 +375,7 @@ func (p *MessageParser) parseGameCancelledNotify(msg *ParsedMessage, data []byte
 		return nil, fmt.Errorf("GameCancelledNotify: failed to parse playerOne: %w", err)
 	}
 	msg.PlayerOne = addr
-	
+
 	return msg, nil
 }
 
@@ -383,9 +383,9 @@ func (p *MessageParser) parseGameCancelledNotify(msg *ParsedMessage, data []byte
 // Structure: gameId: uint256, player: Address, coinSide: uint8
 func (p *MessageParser) parseSecretOpenedNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeSecretOpened
-	
+
 	offset := 0
-	
+
 	// gameId: uint256
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("SecretOpenedNotify: not enough data for gameId")
@@ -393,7 +393,7 @@ func (p *MessageParser) parseSecretOpenedNotify(msg *ParsedMessage, data []byte)
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// player: Address
 	if len(data) < offset+33 {
 		return nil, fmt.Errorf("SecretOpenedNotify: not enough data for player")
@@ -404,12 +404,12 @@ func (p *MessageParser) parseSecretOpenedNotify(msg *ParsedMessage, data []byte)
 	}
 	msg.Player = addr
 	offset += 33
-	
+
 	// coinSide: uint8
 	if len(data) > offset {
 		msg.CoinSide = data[offset]
 	}
-	
+
 	return msg, nil
 }
 
@@ -417,14 +417,14 @@ func (p *MessageParser) parseSecretOpenedNotify(msg *ParsedMessage, data []byte)
 // Structure: gameId: uint256
 func (p *MessageParser) parseDrawNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeDraw
-	
+
 	// gameId: uint256
 	if len(data) < 32 {
 		return nil, fmt.Errorf("DrawNotify: not enough data for gameId")
 	}
 	gameID := new(big.Int).SetBytes(data[:32])
 	msg.GameID = gameID.Int64()
-	
+
 	return msg, nil
 }
 
@@ -432,9 +432,9 @@ func (p *MessageParser) parseDrawNotify(msg *ParsedMessage, data []byte) (*Parse
 // Structure: gameId: uint256, required: coins, actual: coins
 func (p *MessageParser) parseInsufficientBalanceNotify(msg *ParsedMessage, data []byte) (*ParsedMessage, error) {
 	msg.EventType = EventTypeInsufficientBalance
-	
+
 	offset := 0
-	
+
 	// gameId: uint256
 	if len(data) < offset+32 {
 		return nil, fmt.Errorf("InsufficientBalanceNotify: not enough data for gameId")
@@ -442,20 +442,20 @@ func (p *MessageParser) parseInsufficientBalanceNotify(msg *ParsedMessage, data 
 	gameID := new(big.Int).SetBytes(data[offset : offset+32])
 	msg.GameID = gameID.Int64()
 	offset += 32
-	
+
 	// required: coins
 	if len(data) > offset {
 		required, bytesRead := p.parseCoins(data[offset:])
 		msg.Required = required
 		offset += bytesRead
 	}
-	
+
 	// actual: coins
 	if len(data) > offset {
 		actual, _ := p.parseCoins(data[offset:])
 		msg.Actual = actual
 	}
-	
+
 	return msg, nil
 }
 
@@ -465,10 +465,10 @@ func (p *MessageParser) parseAddress(data []byte) (string, error) {
 	if len(data) < 33 {
 		return "", fmt.Errorf("address data too short: %d bytes", len(data))
 	}
-	
+
 	workchain := int8(data[0])
 	hash := data[1:33]
-	
+
 	// Use tonutils-go address library to format
 	addr := address.NewAddress(0, byte(workchain), hash)
 	return addr.String(), nil
@@ -480,17 +480,17 @@ func (p *MessageParser) parseCoins(data []byte) (*big.Int, int) {
 	if len(data) == 0 {
 		return big.NewInt(0), 0
 	}
-	
+
 	// First byte indicates the number of bytes used for the value
 	length := int(data[0])
 	if length == 0 {
 		return big.NewInt(0), 1
 	}
-	
+
 	if len(data) < 1+length {
 		return big.NewInt(0), 1
 	}
-	
+
 	value := new(big.Int).SetBytes(data[1 : 1+length])
 	return value, 1 + length
 }
