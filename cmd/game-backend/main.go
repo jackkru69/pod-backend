@@ -34,28 +34,12 @@ import (
 )
 
 // Prometheus metrics (T059, T121)
+// Note: HTTP metrics are defined in internal/infrastructure/metrics/middleware.go
 var (
 	wsActiveConnections = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "websocket_active_connections",
 		Help: "Number of active WebSocket connections",
 	})
-
-	httpRequestsTotal = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "http_requests_total",
-			Help: "Total number of HTTP requests",
-		},
-		[]string{"method", "path", "status"},
-	)
-
-	httpRequestDuration = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name:    "http_request_duration_seconds",
-			Help:    "HTTP request duration in seconds",
-			Buckets: prometheus.DefBuckets,
-		},
-		[]string{"method", "path"},
-	)
 
 	// Database connection pool metrics (T121)
 	dbConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
@@ -168,7 +152,7 @@ func main() {
 	}))
 
 	// Prometheus metrics middleware
-	app.Use(prometheusMiddleware)
+	app.Use(metrics.New())
 
 	// Health check endpoint
 	healthHandler := rest.NewHealthHandler(pg.Pool, &log.Logger, tonClient)
@@ -203,6 +187,9 @@ func main() {
 
 	// Start WebSocket connection count updater (T059)
 	go updateWebSocketMetrics(gameBroadcastUC)
+
+	// Start database connection pool metrics updater (T121)
+	go updateDatabaseMetrics(pg)
 
 	// Start blockchain event subscription (T095)
 	if err := blockchainHandler.Start(); err != nil {
@@ -275,24 +262,8 @@ func customErrorHandler(c *fiber.Ctx, err error) error {
 	})
 }
 
-// prometheusMiddleware tracks HTTP request metrics
-func prometheusMiddleware(c *fiber.Ctx) error {
-	start := time.Now()
-	path := c.Path()
-	method := c.Method()
-
-	// Process request
-	err := c.Next()
-
-	// Record metrics
-	duration := time.Since(start).Seconds()
-	status := fmt.Sprintf("%d", c.Response().StatusCode())
-
-	httpRequestsTotal.WithLabelValues(method, path, status).Inc()
-	httpRequestDuration.WithLabelValues(method, path).Observe(duration)
-
-	return err
-}
+// prometheusMiddleware is now provided by internal/infrastructure/metrics package
+// See metrics.New() for implementation
 
 // updateWebSocketMetrics periodically updates WebSocket connection count metric (T059)
 func updateWebSocketMetrics(broadcastUC *usecase.GameBroadcastUseCase) {
@@ -306,5 +277,27 @@ func updateWebSocketMetrics(broadcastUC *usecase.GameBroadcastUseCase) {
 		log.Debug().
 			Int("active_connections", count).
 			Msg("Updated WebSocket metrics")
+	}
+}
+
+// updateDatabaseMetrics periodically updates database connection pool metrics (T121)
+func updateDatabaseMetrics(pg *postgres.Postgres) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		stats := pg.Pool.Stat()
+
+		// Update Prometheus metrics
+		dbConnectionsActive.Set(float64(stats.AcquiredConns()))
+		dbConnectionsIdle.Set(float64(stats.IdleConns()))
+		dbConnectionsTotal.Set(float64(stats.TotalConns()))
+
+		log.Debug().
+			Int32("active", stats.AcquiredConns()).
+			Int32("idle", stats.IdleConns()).
+			Int32("total", stats.TotalConns()).
+			Int32("max", stats.MaxConns()).
+			Msg("Updated database connection pool metrics")
 	}
 }

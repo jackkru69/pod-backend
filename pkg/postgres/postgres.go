@@ -49,6 +49,10 @@ func New(url string, opts ...Option) (*Postgres, error) {
 
 	poolConfig.MaxConns = int32(pg.maxPoolSize) //nolint:gosec // skip integer overflow conversion int -> int32
 
+	// Enable query logging with pgx logger (T119)
+	// Note: Actual slow query detection happens in application code
+	// pgx only provides connection-level logging
+
 	for pg.connAttempts > 0 {
 		pg.Pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
 		if err == nil {

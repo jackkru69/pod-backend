@@ -19,9 +19,9 @@ func TestCreateOrUpdateUser_Success(t *testing.T) {
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
 	user := &entity.User{
-		TelegramUserID: 123456789,
+		TelegramUserID:   123456789,
 		TelegramUsername: "testuser",
-		WalletAddress: "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 	}
 
 	mockRepo.On("CreateOrUpdate", mock.Anything, user).Return(nil)
@@ -38,9 +38,9 @@ func TestCreateOrUpdateUser_RepositoryError(t *testing.T) {
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
 	user := &entity.User{
-		TelegramUserID: 123456789,
+		TelegramUserID:   123456789,
 		TelegramUsername: "testuser",
-		WalletAddress: "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 	}
 
 	expectedError := errors.New("database connection failed")
@@ -101,10 +101,10 @@ func TestGetReferralStats_Success(t *testing.T) {
 
 	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
 	expectedStats := &entity.ReferralStats{
-		WalletAddress:        walletAddress,
-		TotalReferrals:       15,
+		WalletAddress:         walletAddress,
+		TotalReferrals:        15,
 		TotalReferralEarnings: 1500000000, // 1.5 TON in nanotons
-		GamesReferred:        25,
+		GamesReferred:         25,
 	}
 
 	mockRepo.On("GetReferralStats", mock.Anything, walletAddress).Return(expectedStats, nil)
@@ -125,10 +125,10 @@ func TestGetReferralStats_NoReferrals(t *testing.T) {
 
 	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
 	expectedStats := &entity.ReferralStats{
-		WalletAddress:        walletAddress,
-		TotalReferrals:       0,
+		WalletAddress:         walletAddress,
+		TotalReferrals:        0,
 		TotalReferralEarnings: 0,
-		GamesReferred:        0,
+		GamesReferred:         0,
 	}
 
 	mockRepo.On("GetReferralStats", mock.Anything, walletAddress).Return(expectedStats, nil)

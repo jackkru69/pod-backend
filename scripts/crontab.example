@@ -1,0 +1,24 @@
+# Pod Game Backend - Cron Configuration (T124)
+# Add these entries to your system crontab: crontab -e
+
+# Monthly data retention cleanup (1st day of month at 2 AM)
+0 2 1 * * /opt/pod-backend/scripts/cleanup-cron.sh
+
+# Alternative: Run cleanup every Sunday at 3 AM (weekly)
+# 0 3 * * 0 /opt/pod-backend/scripts/cleanup-cron.sh
+
+# Database backup before cleanup (1st day of month at 1 AM)
+# 0 1 1 * * pg_dump -U postgres pod_game | gzip > /backups/pod_game_$(date +\%Y\%m\%d).sql.gz
+
+# Partition creation for next month (last day of month at 11 PM)
+# This would run partition creation script (T125) if implemented
+# 0 23 L * * /opt/pod-backend/scripts/create-partitions.sh
+
+# Log rotation (daily at midnight)
+# 0 0 * * * find /var/log/pod-backend -name "*.log" -mtime +30 -delete
+
+# Health check ping (every 5 minutes)
+# */5 * * * * curl -f http://localhost:3000/health || echo "Health check failed" | mail -s "Pod Backend Health Alert" admin@example.com
+
+# Prometheus metrics scrape verification (every hour)
+# 0 * * * * curl -f http://localhost:3000/metrics > /dev/null || echo "Metrics endpoint unavailable"

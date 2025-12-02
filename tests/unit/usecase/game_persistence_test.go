@@ -151,11 +151,11 @@ func TestHandleGameFinished_Success(t *testing.T) {
 
 	// Mock game retrieval to get player addresses
 	existingGame := &entity.Game{
-		GameID:            123,
-		PlayerOneAddress:  winnerAddress,
-		PlayerTwoAddress:  &loserPtr,
-		BetAmount:         1000000000,
-		Status:            entity.GameStatusWaitingForOpenBids,
+		GameID:           123,
+		PlayerOneAddress: winnerAddress,
+		PlayerTwoAddress: &loserPtr,
+		BetAmount:        1000000000,
+		Status:           entity.GameStatusWaitingForOpenBids,
 	}
 	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
 
@@ -166,9 +166,9 @@ func TestHandleGameFinished_Success(t *testing.T) {
 		BlockNumber:     1002,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
-			"game_id":      int64(123),
-			"winner":       winnerAddress,
-			"payout":       int64(1900000000), // 1.9 TON (after fees)
+			"game_id": int64(123),
+			"winner":  winnerAddress,
+			"payout":  int64(1900000000), // 1.9 TON (after fees)
 		},
 	}
 
@@ -202,11 +202,11 @@ func TestHandleDraw_Success(t *testing.T) {
 	player2Ptr := player2
 
 	existingGame := &entity.Game{
-		GameID:            123,
-		PlayerOneAddress:  player1,
-		PlayerTwoAddress:  &player2Ptr,
-		BetAmount:         1000000000,
-		Status:            entity.GameStatusWaitingForOpenBids,
+		GameID:           123,
+		PlayerOneAddress: player1,
+		PlayerTwoAddress: &player2Ptr,
+		BetAmount:        1000000000,
+		Status:           entity.GameStatusWaitingForOpenBids,
 	}
 	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
 
@@ -297,8 +297,8 @@ func TestHandleGameFinished_WithReferrer(t *testing.T) {
 		PlayerOneAddress:     winnerAddress,
 		PlayerOneReferrer:    &referrerPtr, // Winner has a referrer
 		PlayerTwoAddress:     &loserPtr,
-		BetAmount:            1000000000,   // 1 TON
-		ReferrerFeeNumerator: 50,           // 0.5% = 50 basis points
+		BetAmount:            1000000000, // 1 TON
+		ReferrerFeeNumerator: 50,         // 0.5% = 50 basis points
 		Status:               entity.GameStatusWaitingForOpenBids,
 	}
 	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
