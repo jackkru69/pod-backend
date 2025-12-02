@@ -62,7 +62,7 @@ format: ### Run code formatter
 
 run: deps swag-v1 proto-v1 ### swag run for API v1
 	go mod download && \
-	CGO_ENABLED=0 go run -tags migrate ./cmd/app
+	CGO_ENABLED=0 go run -tags migrate ./cmd/game-backend
 .PHONY: run
 
 docker-rm-volume: ### remove docker volume

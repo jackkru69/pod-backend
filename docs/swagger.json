@@ -1,8 +1,22 @@
 {
+    "schemes": [
+        "http",
+        "https"
+    ],
     "swagger": "2.0",
     "info": {
-        "contact": {}
+        "description": "Backend service for TON blockchain gambling game with real-time WebSocket updates",
+        "title": "POD Game Backend API",
+        "contact": {
+            "name": "POD Game Team"
+        },
+        "license": {
+            "name": "BUSL-1.1"
+        },
+        "version": "1.0.0"
     },
+    "host": "localhost:3000",
+    "basePath": "/api/v1",
     "paths": {
         "/api/v1/games": {
             "get": {
@@ -692,6 +706,14 @@
                     "type": "string"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "TelegramAuth": {
+            "description": "Telegram Mini App authentication via initData string",
+            "type": "apiKey",
+            "name": "X-Telegram-Init-Data",
+            "in": "header"
         }
     }
 }

@@ -27,26 +27,27 @@ type EventHandler interface {
 // Poller implements adaptive interval polling for blockchain events.
 // Decreases interval when activity detected, increases when idle.
 type Poller struct {
-	client             *Client
-	handler            EventHandler
-	logger             logger.Interface
-	currentInterval    time.Duration
-	lastProcessedBlock int64
-	ticker             *time.Ticker
-	stopCh             chan struct{}
-	backoffDuration    time.Duration // Current exponential backoff duration (T103)
-	consecutiveErrors  int           // Count for exponential backoff
+	client            *Client
+	handler           EventHandler
+	logger            logger.Interface
+	currentInterval   time.Duration
+	lastProcessedLt   string // Last processed logical time (lt)
+	ticker            *time.Ticker
+	stopCh            chan struct{}
+	backoffDuration   time.Duration // Current exponential backoff duration (T103)
+	consecutiveErrors int           // Count for exponential backoff
 }
 
 // NewPoller creates a new adaptive blockchain poller.
+// startBlock parameter is kept for API compatibility but ignored since TON uses logical time (lt).
 func NewPoller(client *Client, handler EventHandler, logger logger.Interface, startBlock int64) *Poller {
 	return &Poller{
-		client:             client,
-		handler:            handler,
-		logger:             logger,
-		currentInterval:    MaxPollInterval, // Start slow
-		lastProcessedBlock: startBlock,
-		stopCh:             make(chan struct{}),
+		client:          client,
+		handler:         handler,
+		logger:          logger,
+		currentInterval: MaxPollInterval, // Start slow
+		lastProcessedLt: "0",             // Start from beginning
+		stopCh:          make(chan struct{}),
 	}
 }
 
@@ -56,7 +57,7 @@ func (p *Poller) Start(ctx context.Context) {
 	p.ticker = time.NewTicker(p.currentInterval)
 
 	go func() {
-		p.logger.Info("Starting blockchain poller from block %d", p.lastProcessedBlock)
+		p.logger.Info("Starting blockchain poller from lt %s", p.lastProcessedLt)
 
 		for {
 			select {
@@ -83,9 +84,10 @@ func (p *Poller) Stop() {
 
 // poll performs a single poll cycle.
 func (p *Poller) poll(ctx context.Context) {
-	p.logger.Debug("Polling from block %d", p.lastProcessedBlock)
+	p.logger.Debug("Polling from lt %s", p.lastProcessedLt)
 
-	txs, err := p.client.GetTransactions(ctx, p.lastProcessedBlock+1, PollBatchSize)
+	// Note: fromBlock parameter is not actually used by TON Center REST API
+	txs, err := p.client.GetTransactions(ctx, 0, PollBatchSize)
 	if err != nil {
 		p.logger.Error("Failed to fetch transactions", err)
 		p.handleError() // Exponential backoff (T103)
@@ -107,13 +109,14 @@ func (p *Poller) poll(ctx context.Context) {
 	// Process transactions
 	for _, tx := range txs {
 		if err := p.handler.HandleTransaction(ctx, tx); err != nil {
-			p.logger.Error("Failed to handle transaction %s", err, tx.Hash)
+			p.logger.Error("Failed to handle transaction hash=%s: %v", tx.Hash(), err)
 			continue
 		}
 
-		// Update last processed block
-		if tx.BlockNumber > p.lastProcessedBlock {
-			p.lastProcessedBlock = tx.BlockNumber
+		// Update last processed logical time (lt)
+		// TON uses lt (logical time) for transaction ordering, higher lt means newer
+		if tx.Lt() > p.lastProcessedLt {
+			p.lastProcessedLt = tx.Lt()
 		}
 	}
 
@@ -172,13 +175,29 @@ func (p *Poller) adjustInterval(hasActivity bool) {
 }
 
 // GetLastProcessedBlock returns the last successfully processed block number.
+// Note: For TON blockchain, we track logical time (lt) instead of block numbers.
+// This method is kept for API compatibility.
 func (p *Poller) GetLastProcessedBlock() int64 {
-	return p.lastProcessedBlock
+	// Return 0 as we don't track block numbers anymore
+	return 0
 }
 
 // SetLastProcessedBlock updates the starting block for polling.
 // Useful for resuming from database state.
+// Note: For TON blockchain, this sets the logical time (lt) as a string.
 func (p *Poller) SetLastProcessedBlock(block int64) {
-	p.lastProcessedBlock = block
-	p.logger.Info("Set last processed block to %d", block)
+	// For compatibility, we ignore the block number
+	p.logger.Info("SetLastProcessedBlock called with %d (ignored for TON)", block)
+}
+
+// GetLastProcessedLt returns the last successfully processed logical time.
+func (p *Poller) GetLastProcessedLt() string {
+	return p.lastProcessedLt
+}
+
+// SetLastProcessedLt updates the starting logical time for polling.
+// Useful for resuming from database state.
+func (p *Poller) SetLastProcessedLt(lt string) {
+	p.lastProcessedLt = lt
+	p.logger.Info("Set last processed lt to %s", lt)
 }

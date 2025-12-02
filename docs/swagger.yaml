@@ -1,3 +1,4 @@
+basePath: /api/v1
 definitions:
   entity.Game:
     properties:
@@ -202,8 +203,16 @@ definitions:
       message:
         type: string
     type: object
+host: localhost:3000
 info:
-  contact: {}
+  contact:
+    name: POD Game Team
+  description: Backend service for TON blockchain gambling game with real-time WebSocket
+    updates
+  license:
+    name: BUSL-1.1
+  title: POD Game Backend API
+  version: 1.0.0
 paths:
   /api/v1/games:
     get:
@@ -470,4 +479,13 @@ paths:
       summary: Show history
       tags:
       - translation
+schemes:
+- http
+- https
+securityDefinitions:
+  TelegramAuth:
+    description: Telegram Mini App authentication via initData string
+    in: header
+    name: X-Telegram-Init-Data
+    type: apiKey
 swagger: "2.0"

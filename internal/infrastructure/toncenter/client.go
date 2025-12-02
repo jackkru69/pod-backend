@@ -50,20 +50,34 @@ func NewClient(cfg ClientConfig) *Client {
 	}
 }
 
-// Transaction represents a simplified TON blockchain transaction.
+// Transaction represents a TON blockchain transaction from TON Center API.
+// The API returns raw transaction data from the blockchain.
+// The Data field contains base64-encoded BOC (Bag of Cells) format that needs parsing.
 type Transaction struct {
-	Hash        string          `json:"hash"`
-	Lt          string          `json:"lt"`
-	BlockNumber int64           `json:"block_number"`
-	Timestamp   int64           `json:"utime"`
-	Data        json.RawMessage `json:"data"` // Raw event data
+	Type          string `json:"@type"` // Transaction type (e.g., "raw.transaction")
+	TransactionID struct {
+		Type string `json:"@type"` // internal.transactionId
+		Lt   string `json:"lt"`    // Logical time
+		Hash string `json:"hash"`  // Transaction hash (base64)
+	} `json:"transaction_id"`
+	Utime      int64           `json:"utime"`       // Unix timestamp
+	Data       string          `json:"data"`        // Base64-encoded BOC transaction data
+	InMsg      json.RawMessage `json:"in_msg"`      // Incoming message data
+	OutMsgs    json.RawMessage `json:"out_msgs"`    // Outgoing messages data
+	Fee        string          `json:"fee"`         // Transaction fee in nanotons
+	StorageFee string          `json:"storage_fee"` // Storage fee in nanotons
+	OtherFee   string          `json:"other_fee"`   // Other fees in nanotons
+	Address    json.RawMessage `json:"address"`     // Account address info
 }
 
-// TransactionsResponse represents the API response for transaction queries.
-type TransactionsResponse struct {
-	OK     bool          `json:"ok"`
-	Result []Transaction `json:"result"`
-	Error  string        `json:"error,omitempty"`
+// Hash returns the transaction hash for convenience
+func (t *Transaction) Hash() string {
+	return t.TransactionID.Hash
+}
+
+// Lt returns the logical time for convenience
+func (t *Transaction) Lt() string {
+	return t.TransactionID.Lt
 }
 
 // GetTransactions retrieves transactions for the contract starting from a specific block.
@@ -80,13 +94,14 @@ func (c *Client) GetTransactions(ctx context.Context, fromBlock int64, limit int
 	return result.([]Transaction), nil
 }
 
-// doGetTransactions performs the actual HTTP request to TON Center API.
+// doGetTransactions performs the actual HTTP request to TON Center API v2 (REST).
 func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
-	url := fmt.Sprintf("%s/api/v2/getTransactions?address=%s&limit=%d&from_block=%d",
+	// TON Center API v2 uses REST format with /getTransactions endpoint
+	// The base URL should not include /api/v2/ as it's added here
+	url := fmt.Sprintf("%s/getTransactions?address=%s&limit=%d&to_lt=0&archival=false",
 		c.v2BaseURL,
 		c.contractAddress,
 		limit,
-		fromBlock,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -105,16 +120,21 @@ func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit i
 		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var apiResp TransactionsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+	// TON Center returns wrapped response with ok and result fields
+	var response struct {
+		OK     bool          `json:"ok"`
+		Result []Transaction `json:"result"`
+		Error  string        `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("decode transactions: %w", err)
 	}
 
-	if !apiResp.OK {
-		return nil, fmt.Errorf("api error: %s", apiResp.Error)
+	if !response.OK {
+		return nil, fmt.Errorf("API error: %s", response.Error)
 	}
 
-	return apiResp.Result, nil
+	return response.Result, nil
 }
 
 // GetCircuitBreakerState returns the current state of the circuit breaker.

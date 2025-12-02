@@ -9,7 +9,12 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "contact": {},
+        "contact": {
+            "name": "POD Game Team"
+        },
+        "license": {
+            "name": "BUSL-1.1"
+        },
         "version": "{{.Version}}"
     },
     "host": "{{.Host}}",
@@ -704,17 +709,25 @@ const docTemplate = `{
                 }
             }
         }
+    },
+    "securityDefinitions": {
+        "TelegramAuth": {
+            "description": "Telegram Mini App authentication via initData string",
+            "type": "apiKey",
+            "name": "X-Telegram-Init-Data",
+            "in": "header"
+        }
     }
 }`
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "",
-	Host:             "",
-	BasePath:         "",
-	Schemes:          []string{},
-	Title:            "",
-	Description:      "",
+	Version:          "1.0.0",
+	Host:             "localhost:3000",
+	BasePath:         "/api/v1",
+	Schemes:          []string{"http", "https"},
+	Title:            "POD Game Backend API",
+	Description:      "Backend service for TON blockchain gambling game with real-time WebSocket updates",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

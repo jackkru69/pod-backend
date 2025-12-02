@@ -56,18 +56,18 @@ func (uc *BlockchainSubscriberUseCase) SetMetrics(m *metrics.BlockchainMetrics) 
 func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx toncenter.Transaction) error {
 	startTime := time.Now()
 
-	uc.logger.Info("Received blockchain transaction hash=%s block=%d lt=%s",
-		tx.Hash, tx.BlockNumber, tx.Lt)
+	// Use Debug level for all transactions, Info only for game events
+	uc.logger.Debug("Received blockchain transaction hash=%s lt=%s utime=%d",
+		tx.Hash(), tx.Lt(), tx.Utime)
 
 	// Parse transaction data into GameEvent
 	event, err := uc.parseTransaction(tx)
 	if err != nil {
-		uc.logger.Warn("Failed to parse transaction hash=%s block=%d: %v",
-			tx.Hash, tx.BlockNumber, err)
-		if uc.metrics != nil {
-			uc.metrics.RecordEventFailed("unknown", "parse_error")
-		}
-		return fmt.Errorf("failed to parse transaction: %w", err)
+		// Most transactions won't be game events, so this is normal - use Debug level
+		uc.logger.Debug("Skipping non-game transaction hash=%s lt=%s: %v",
+			tx.Hash(), tx.Lt(), err)
+		// Don't record metrics for non-game transactions
+		return nil // Return nil instead of error to continue processing
 	}
 
 	// Record event received (T097)
@@ -104,44 +104,53 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 // parseTransaction converts a blockchain transaction into a GameEvent entity.
 // Extracts event type, game ID, and event-specific data from transaction payload.
 // T096: Logs WARN for validation failures.
+// NOTE: tx.Data contains base64-encoded BOC (Bag of Cells) format.
+// For now, we'll need to parse in_msg to get the actual game event data.
 func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction) (*entity.GameEvent, error) {
-	// Parse transaction data as JSON
-	var txData map[string]interface{}
-	if err := json.Unmarshal(tx.Data, &txData); err != nil {
-		uc.logger.Warn("Failed to unmarshal transaction data hash=%s: %v", tx.Hash, err)
-		return nil, fmt.Errorf("failed to unmarshal transaction data: %w", err)
+	// Check if in_msg exists and is not null
+	if len(tx.InMsg) == 0 || string(tx.InMsg) == "null" {
+		// This is a normal blockchain transaction without game event data
+		return nil, fmt.Errorf("transaction has no in_msg data (not a game event)")
 	}
+
+	// Parse in_msg which contains the actual message data
+	var inMsg map[string]interface{}
+	if err := json.Unmarshal(tx.InMsg, &inMsg); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal in_msg: %w", err)
+	}
+
+	// For now, use in_msg as transaction data
+	// TODO: Implement proper BOC parsing when contract structure is defined
+	txData := inMsg
 
 	// Extract event type
 	eventType, ok := txData["event_type"].(string)
 	if !ok {
-		uc.logger.Warn("Missing or invalid event_type in transaction hash=%s", tx.Hash)
 		return nil, fmt.Errorf("missing or invalid event_type in transaction data")
 	}
 
 	// Extract game ID
 	gameIDFloat, ok := txData["game_id"].(float64)
 	if !ok {
-		uc.logger.Warn("Missing or invalid game_id in transaction hash=%s event_type=%s",
-			tx.Hash, eventType)
 		return nil, fmt.Errorf("missing or invalid game_id in transaction data")
 	}
 	gameID := int64(gameIDFloat)
 
 	// Create GameEvent entity
+	// Note: BlockNumber is set to 0 as TON uses logical time (lt) for ordering
 	event := &entity.GameEvent{
 		EventType:       eventType,
 		GameID:          gameID,
-		TransactionHash: tx.Hash,
-		BlockNumber:     tx.BlockNumber,
-		Timestamp:       time.Unix(tx.Timestamp, 0),
+		TransactionHash: tx.Hash(),
+		BlockNumber:     0, // TON doesn't use block numbers in the same way
+		Timestamp:       time.Unix(tx.Utime, 0),
 		EventData:       txData,
 	}
 
 	// Validate event entity (FR-011, T096)
 	if err := event.Validate(); err != nil {
 		uc.logger.Warn("Event validation failed for game_id=%d event_type=%s tx=%s: %v",
-			gameID, eventType, tx.Hash, err)
+			gameID, eventType, tx.Hash(), err)
 		return nil, fmt.Errorf("event validation failed: %w", err)
 	}
 

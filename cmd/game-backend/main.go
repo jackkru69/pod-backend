@@ -14,6 +14,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -64,6 +65,11 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 
 	log.Info().Msg("Starting Game Backend Service")
+
+	// Load .env file (ignore error if file doesn't exist)
+	if err := godotenv.Load(); err != nil {
+		log.Warn().Msg("No .env file found, using environment variables")
+	}
 
 	// Load configuration from environment
 	appCfg, err := config.NewConfig()

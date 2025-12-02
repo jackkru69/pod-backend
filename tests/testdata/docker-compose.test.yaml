@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 # Docker Compose test environment (T109)
 # Isolated testing environment with PostgreSQL and mock TON Center
@@ -14,7 +14,7 @@ services:
       POSTGRES_DB: pod_game_test
       PGDATA: /var/lib/postgresql/data
     ports:
-      - "5433:5432"  # Different port to avoid conflicts
+      - "5433:5432" # Different port to avoid conflicts
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
       - ../../migrations:/docker-entrypoint-initdb.d:ro
@@ -72,7 +72,7 @@ services:
       LOG_LEVEL: "debug"
 
       # TON Blockchain (mock)
-      TON_CENTER_V2_URL: "http://mock-toncenter:8082/api/v2"
+      TON_CENTER_V2_URL: "http://mock-toncenter:8082"
       TON_GAME_CONTRACT_ADDRESS: "0:test_contract_address"
 
       # Circuit Breaker

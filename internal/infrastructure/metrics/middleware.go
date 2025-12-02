@@ -38,11 +38,11 @@ var (
 		[]string{"operation", "status"},
 	)
 
-	// dbQueryDuration tracks database query duration in seconds
+	// dbQueryDuration tracks database query duration in seconds for HTTP operations
 	dbQueryDuration = promauto.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "database_queries_duration_seconds",
-			Help:    "Database query duration in seconds",
+			Name:    "http_database_queries_duration_seconds",
+			Help:    "Database query duration in seconds for HTTP operations",
 			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5},
 		},
 		[]string{"operation"},

@@ -197,7 +197,7 @@ func main() {
 
 	// API routes
 	http.HandleFunc("/health", mock.handleHealth)
-	http.HandleFunc("/api/v2/getTransactions", mock.handleGetTransactions)
+	http.HandleFunc("/getTransactions", mock.handleGetTransactions)
 
 	// Test control routes
 	http.HandleFunc("/test/add-transaction", mock.handleAddTransaction)
