@@ -162,6 +162,8 @@ func main() {
 
 	// Health check endpoint
 	healthHandler := rest.NewHealthHandler(pg.Pool, &log.Logger, tonClient)
+	// T162: Wire up event source provider for health reporting
+	healthHandler.SetEventSourceProvider(blockchainHandler)
 	app.Get("/health", healthHandler.GetHealth)
 
 	// Prometheus metrics endpoint

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	sq "github.com/Masterminds/squirrel"
+
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
 	"pod-backend/pkg/postgres"
@@ -256,7 +258,7 @@ func (r *UserRepository) Update(ctx context.Context, user *entity.User) error {
 func (r *UserRepository) IncrementGamesPlayed(ctx context.Context, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
-		Set("total_games_played", "total_games_played + 1").
+		Set("total_games_played", sq.Expr("total_games_played + 1")).
 		Where("wallet_address = ?", walletAddress).
 		ToSql()
 	if err != nil {
@@ -275,7 +277,7 @@ func (r *UserRepository) IncrementGamesPlayed(ctx context.Context, walletAddress
 func (r *UserRepository) IncrementWins(ctx context.Context, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
-		Set("total_wins", "total_wins + 1").
+		Set("total_wins", sq.Expr("total_wins + 1")).
 		Where("wallet_address = ?", walletAddress).
 		ToSql()
 	if err != nil {
@@ -294,7 +296,7 @@ func (r *UserRepository) IncrementWins(ctx context.Context, walletAddress string
 func (r *UserRepository) IncrementLosses(ctx context.Context, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
-		Set("total_losses", "total_losses + 1").
+		Set("total_losses", sq.Expr("total_losses + 1")).
 		Where("wallet_address = ?", walletAddress).
 		ToSql()
 	if err != nil {
@@ -313,8 +315,8 @@ func (r *UserRepository) IncrementLosses(ctx context.Context, walletAddress stri
 func (r *UserRepository) IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
-		Set("total_referrals", "total_referrals + 1").
-		Set("total_referral_earnings", fmt.Sprintf("total_referral_earnings + %d", earningsNanotons)).
+		Set("total_referrals", sq.Expr("total_referrals + 1")).
+		Set("total_referral_earnings", sq.Expr(fmt.Sprintf("total_referral_earnings + %d", earningsNanotons))).
 		Where("wallet_address = ?", walletAddress).
 		ToSql()
 	if err != nil {

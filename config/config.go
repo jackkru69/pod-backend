@@ -85,6 +85,11 @@ type (
 		CircuitBreakerTimeout string `env:"CIRCUIT_BREAKER_TIMEOUT" envDefault:"60s"`
 		TelegramBotToken      string `env:"TELEGRAM_BOT_TOKEN"`
 		CORSAllowedOrigins    string `env:"CORS_ALLOWED_ORIGINS" envDefault:"http://localhost:3001"`
+		// WebSocket Event Streaming Configuration (Phase 10)
+		BlockchainEventSource string `env:"BLOCKCHAIN_EVENT_SOURCE" envDefault:"http"` // "websocket" or "http"
+		EnableWebSocket       bool   `env:"ENABLE_WEBSOCKET" envDefault:"false"`       // Enable WebSocket event streaming
+		WebSocketReconnectMax int    `env:"WS_RECONNECT_MAX_ATTEMPTS" envDefault:"10"` // Max reconnection attempts before fallback
+		WebSocketPingInterval string `env:"WS_PING_INTERVAL" envDefault:"30s"`         // WebSocket ping interval for health check
 	}
 )
 

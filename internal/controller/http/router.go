@@ -7,6 +7,7 @@ import (
 	"github.com/ansrivas/fiberprometheus/v2"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/swagger"
+	fiberws "github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog"
 
 	"pod-backend/config"
@@ -14,6 +15,7 @@ import (
 	"pod-backend/internal/controller/http/middleware"
 	v1 "pod-backend/internal/controller/http/v1"
 	"pod-backend/internal/controller/rest"
+	"pod-backend/internal/controller/websocket"
 	corsmw "pod-backend/internal/infrastructure/cors"
 	"pod-backend/internal/infrastructure/ratelimit"
 	"pod-backend/internal/infrastructure/telegram"
@@ -119,4 +121,24 @@ func NewRouter(app *fiber.App, cfg *config.Config, t usecase.Translation, l logg
 		// Health route
 		apiV1Group.Get("/health", healthHandler.GetHealth)
 	}
+
+	// WebSocket routes for real-time game updates (FR-009, FR-010)
+	// Initialize WebSocket handler
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+	gameWSHandler := websocket.NewGameWebSocketHandler(gameRepo, broadcastUC)
+
+	// WebSocket upgrade middleware + handler
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		// Check if this is a WebSocket upgrade request
+		if fiberws.IsWebSocketUpgrade(c) {
+			c.Locals("allowed", true)
+			return c.Next()
+		}
+		return c.Status(fiber.StatusUpgradeRequired).JSON(fiber.Map{
+			"error": "Upgrade Required",
+		})
+	})
+
+	// WebSocket endpoint for game updates
+	app.Get("/ws/games/:id", gameWSHandler.UpgradeCheck, fiberws.New(gameWSHandler.HandleConnection))
 }

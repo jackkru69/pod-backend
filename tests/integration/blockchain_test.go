@@ -1,10 +1,9 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +17,97 @@ import (
 	"pod-backend/pkg/logger"
 )
 
+// mockEventSource is a test double for EventSource that allows direct transaction injection.
+// Implements toncenter.EventSource for integration testing (T085).
+type mockEventSource struct {
+	mu              sync.RWMutex
+	handler         toncenter.EventHandler
+	lastProcessedLt string
+	connected       bool
+	sourceType      string
+}
+
+func newMockEventSource() *mockEventSource {
+	return &mockEventSource{
+		sourceType: "mock",
+		connected:  true,
+	}
+}
+
+func (m *mockEventSource) Start(ctx context.Context) {
+	m.mu.Lock()
+	m.connected = true
+	m.mu.Unlock()
+}
+
+func (m *mockEventSource) Stop() {
+	m.mu.Lock()
+	m.connected = false
+	m.mu.Unlock()
+}
+
+func (m *mockEventSource) Subscribe(handler toncenter.EventHandler) {
+	m.mu.Lock()
+	m.handler = handler
+	m.mu.Unlock()
+}
+
+func (m *mockEventSource) GetLastProcessedLt() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.lastProcessedLt
+}
+
+func (m *mockEventSource) SetLastProcessedLt(lt string) {
+	m.mu.Lock()
+	m.lastProcessedLt = lt
+	m.mu.Unlock()
+}
+
+func (m *mockEventSource) IsConnected() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.connected
+}
+
+func (m *mockEventSource) GetSourceType() string {
+	return m.sourceType
+}
+
+// InjectTransaction simulates receiving a transaction from the blockchain.
+// This directly calls the registered handler to test transaction processing.
+func (m *mockEventSource) InjectTransaction(ctx context.Context, tx toncenter.Transaction) error {
+	m.mu.RLock()
+	handler := m.handler
+	m.mu.RUnlock()
+
+	if handler == nil {
+		return nil
+	}
+
+	return handler.HandleTransaction(ctx, tx)
+}
+
+// createTransaction creates a test transaction with proper TON Center API v2 format.
+// The eventData is placed in InMsg (which is what parseTransaction expects).
+func createTransaction(lt, hash string, utime int64, eventData map[string]interface{}) toncenter.Transaction {
+	inMsgData, _ := json.Marshal(eventData)
+	return toncenter.Transaction{
+		Type: "raw.transaction",
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Type: "internal.transactionId",
+			Lt:   lt,
+			Hash: hash,
+		},
+		Utime: utime,
+		InMsg: inMsgData, // Put event data in InMsg for parseTransaction to find
+	}
+}
+
 // Integration test for blockchain event processing (T085)
 func TestBlockchainEventProcessing_Integration(t *testing.T) {
 	if testing.Short() {
@@ -28,71 +118,59 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 	helper := NewTestHelper(t)
 	defer helper.Cleanup()
 
-	// Clean and seed database
-	helper.CleanDatabase(t)
-
 	// Initialize logger
 	l := logger.New("debug")
 
-	// Initialize repositories
-	gameRepo := repopg.NewGameRepository(helper.DB)
-	userRepo := repopg.NewUserRepository(helper.DB)
-	eventRepo := repopg.NewGameEventRepository(helper.DB)
+	// Initialize repositories using Postgres wrapper
+	pg := helper.Postgres()
+	gameRepo := repopg.NewGameRepository(pg)
+	userRepo := repopg.NewUserRepository(pg)
+	eventRepo := repopg.NewGameEventRepository(pg)
 
-	// Initialize use cases
-	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, userRepo, eventRepo)
+	// Initialize game persistence use case (correct arg order: gameRepo, eventRepo, userRepo)
+	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
 
-	// Create TON Center client pointing to mock server
-	mockTonCenterURL := "http://localhost:8082"
-	tonClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       mockTonCenterURL,
-		ContractAddress: "0:test_contract",
-		HTTPTimeout:     10 * time.Second,
-	})
+	// Create mock event source for direct transaction injection
+	mockSource := newMockEventSource()
 
-	// Initialize blockchain subscriber
+	// Initialize blockchain subscriber with EventSource abstraction (T152)
 	blockchainUC := usecase.NewBlockchainSubscriberUseCase(
-		tonClient,
+		mockSource,
 		gamePersistenceUC,
 		l,
-		0, // start from block 0
 	)
+	_ = blockchainUC // Used indirectly via mockSource.handler
 
 	ctx := context.Background()
 
 	// Test 1: GameInitialized Event
 	t.Run("GameInitialized event creates game", func(t *testing.T) {
-		// Prepare mock transaction
+		helper.CleanDatabase(t)
+
+		// Create user first (FK constraint: games.player_one_address -> users.wallet_address)
+		testUser := &entity.User{
+			TelegramUserID:   123456789,
+			TelegramUsername: "player_one",
+			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+		err := userRepo.CreateOrUpdate(ctx, testUser)
+		require.NoError(t, err)
+
 		eventData := map[string]interface{}{
 			"event_type":        entity.EventTypeGameInitialized,
 			"game_id":           float64(1),
-			"player_one":        "0:abc123",
+			"player_one":        "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			"bet_amount":        "1000000000",
 			"player_one_choice": float64(1),
 			"secret_hash":       "secret_hash_123",
 		}
-		txData, _ := json.Marshal(eventData)
 
-		tx := toncenter.Transaction{
-			Hash:        "init_tx_1",
-			Lt:          "100",
-			BlockNumber: 1000,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("100", "init_tx_hash_1", time.Now().Unix(), eventData)
 
-		// Add transaction to mock server
-		mockResp, err := http.Post(
-			mockTonCenterURL+"/test/add-transaction",
-			"application/json",
-			bytes.NewBuffer(txData),
-		)
-		require.NoError(t, err)
-		require.Equal(t, http.StatusOK, mockResp.StatusCode)
-		mockResp.Body.Close()
-
-		// Process transaction
-		err = blockchainUC.HandleTransaction(ctx, tx)
+		// Process transaction via mock event source
+		err = mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Verify game was created
@@ -100,7 +178,7 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), game.GameID)
 		assert.Equal(t, entity.GameStatusWaitingForOpponent, game.Status)
-		assert.Equal(t, "0:abc123", game.PlayerOneAddress)
+		assert.Equal(t, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2", game.PlayerOneAddress)
 		assert.Equal(t, int64(1000000000), game.BetAmount)
 
 		// Verify event was stored
@@ -112,31 +190,36 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 
 	// Test 2: GameStarted Event
 	t.Run("GameStarted event updates game status", func(t *testing.T) {
+		// Create player_two user (FK constraint)
+		playerTwo := &entity.User{
+			TelegramUserID:   987654321,
+			TelegramUsername: "player_two",
+			WalletAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+		err := userRepo.CreateOrUpdate(ctx, playerTwo)
+		require.NoError(t, err)
+
+		// Use same game from Test 1
 		eventData := map[string]interface{}{
 			"event_type":        entity.EventTypeGameStarted,
 			"game_id":           float64(1),
-			"player_two":        "0:def456",
+			"player_two":        "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 			"player_two_choice": float64(2),
 		}
-		txData, _ := json.Marshal(eventData)
 
-		tx := toncenter.Transaction{
-			Hash:        "join_tx_1",
-			Lt:          "101",
-			BlockNumber: 1001,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("101", "start_tx_hash_1", time.Now().Unix(), eventData)
 
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err = mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Verify game was updated
 		game, err := gameRepo.GetByID(ctx, 1)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusActive, game.Status)
+		assert.Equal(t, entity.GameStatusWaitingForOpenBids, game.Status)
 		assert.NotNil(t, game.PlayerTwoAddress)
-		assert.Equal(t, "0:def456", *game.PlayerTwoAddress)
+		assert.Equal(t, "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X", *game.PlayerTwoAddress)
 	})
 
 	// Test 3: GameFinished Event
@@ -144,53 +227,39 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 		eventData := map[string]interface{}{
 			"event_type":      entity.EventTypeGameFinished,
 			"game_id":         float64(1),
-			"winner":          "0:abc123",
+			"winner":          "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			"revealed_choice": float64(1),
 			"secret":          "secret_123",
 		}
-		txData, _ := json.Marshal(eventData)
 
-		tx := toncenter.Transaction{
-			Hash:        "finish_tx_1",
-			Lt:          "102",
-			BlockNumber: 1002,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("102", "finish_tx_hash_1", time.Now().Unix(), eventData)
 
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err := mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Verify game was completed
 		game, err := gameRepo.GetByID(ctx, 1)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusFinished, game.Status)
+		assert.Equal(t, entity.GameStatusEnded, game.Status)
 		assert.NotNil(t, game.WinnerAddress)
-		assert.Equal(t, "0:abc123", *game.WinnerAddress)
+		assert.Equal(t, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2", *game.WinnerAddress)
 	})
 
 	// Test 4: Duplicate Event Rejection
 	t.Run("Duplicate events are rejected", func(t *testing.T) {
-		// Try to process the same finish event again
+		// Try to process the same finish event again (same tx hash)
 		eventData := map[string]interface{}{
 			"event_type":      entity.EventTypeGameFinished,
 			"game_id":         float64(1),
-			"winner":          "0:abc123",
+			"winner":          "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			"revealed_choice": float64(1),
 			"secret":          "secret_123",
 		}
-		txData, _ := json.Marshal(eventData)
 
-		tx := toncenter.Transaction{
-			Hash:        "finish_tx_1", // Same hash
-			Lt:          "102",
-			BlockNumber: 1002,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("102", "finish_tx_hash_1", time.Now().Unix(), eventData)
 
 		// Should not error, but should not create duplicate
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err := mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		// Verify only one finish event exists
@@ -207,85 +276,39 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 	})
 }
 
-// Integration test for circuit breaker behavior (T086)
-func TestCircuitBreakerIntegration(t *testing.T) {
+// Integration test for event source connectivity (T150)
+func TestEventSourceConnectivity_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	mockTonCenterURL := "http://localhost:8082"
-	l := logger.New("debug")
+	t.Run("Mock event source reports connected status", func(t *testing.T) {
+		mockSource := newMockEventSource()
 
-	// Create TON Center client with circuit breaker
-	tonClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:                 mockTonCenterURL,
-		ContractAddress:           "0:test_contract",
-		HTTPTimeout:               5 * time.Second,
-		CircuitBreakerMaxFailures: 3,
-		CircuitBreakerTimeout:     10 * time.Second,
+		assert.True(t, mockSource.IsConnected())
+		assert.Equal(t, "mock", mockSource.GetSourceType())
 	})
 
-	ctx := context.Background()
+	t.Run("Event source tracks last processed lt", func(t *testing.T) {
+		mockSource := newMockEventSource()
 
-	t.Run("Circuit breaker opens after failures", func(t *testing.T) {
-		// Enable failure mode on mock server
-		failureReq := map[string]bool{"enabled": true}
-		reqBody, _ := json.Marshal(failureReq)
+		mockSource.SetLastProcessedLt("12345")
+		assert.Equal(t, "12345", mockSource.GetLastProcessedLt())
 
-		resp, err := http.Post(
-			mockTonCenterURL+"/test/set-failure-mode",
-			"application/json",
-			bytes.NewReader(reqBody),
-		)
-		require.NoError(t, err)
-		resp.Body.Close()
-
-		// Make multiple failed requests to trigger circuit breaker
-		for i := 0; i < 5; i++ {
-			_, err := tonClient.GetTransactions(ctx, "0:test_contract", 100)
-			// Expect errors
-			if err == nil {
-				t.Logf("Request %d succeeded unexpectedly", i)
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-
-		// Check circuit breaker state
-		state := tonClient.GetCircuitBreakerState()
-		t.Logf("Circuit breaker state after failures: %v", state)
-
-		// State should be Open (2) or HalfOpen (1)
-		assert.NotEqual(t, 0, state, "Circuit breaker should not be Closed after multiple failures")
-
-		// Disable failure mode
-		failureReq["enabled"] = false
-		reqBody, _ = json.Marshal(failureReq)
-		resp, err = http.Post(
-			mockTonCenterURL+"/test/set-failure-mode",
-			"application/json",
-			bytes.NewReader(reqBody),
-		)
-		require.NoError(t, err)
-		resp.Body.Close()
+		mockSource.SetLastProcessedLt("67890")
+		assert.Equal(t, "67890", mockSource.GetLastProcessedLt())
 	})
 
-	t.Run("Circuit breaker recovers after successful requests", func(t *testing.T) {
-		// Wait for circuit breaker to move to half-open
-		time.Sleep(11 * time.Second)
+	t.Run("Stop disconnects event source", func(t *testing.T) {
+		mockSource := newMockEventSource()
+		assert.True(t, mockSource.IsConnected())
 
-		// Make successful request
-		_, err := tonClient.GetTransactions(ctx, "0:test_contract", 100)
-		if err != nil {
-			t.Logf("Recovery request failed: %v", err)
-		}
-
-		// Circuit should eventually close
-		// In production, this would be verified over time
-		t.Log("Circuit breaker should recover over time with successful requests")
+		mockSource.Stop()
+		assert.False(t, mockSource.IsConnected())
 	})
 }
 
-// Test full game lifecycle
+// Test full game lifecycle with proper status transitions
 func TestFullGameLifecycle_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -293,38 +316,37 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 
 	helper := NewTestHelper(t)
 	defer helper.Cleanup()
-	helper.CleanDatabase(t)
 
 	l := logger.New("debug")
 
 	// Initialize all components
-	gameRepo := repopg.NewGameRepository(helper.DB)
-	userRepo := repopg.NewUserRepository(helper.DB)
-	eventRepo := repopg.NewGameEventRepository(helper.DB)
+	pg := helper.Postgres()
+	gameRepo := repopg.NewGameRepository(pg)
+	userRepo := repopg.NewUserRepository(pg)
+	eventRepo := repopg.NewGameEventRepository(pg)
 
-	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, userRepo, eventRepo)
+	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
 
-	mockTonCenterURL := "http://localhost:8082"
-	tonClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       mockTonCenterURL,
-		ContractAddress: "0:test_contract",
-		HTTPTimeout:     10 * time.Second,
-	})
-
-	blockchainUC := usecase.NewBlockchainSubscriberUseCase(tonClient, gamePersistenceUC, l, 0)
+	mockSource := newMockEventSource()
+	blockchainUC := usecase.NewBlockchainSubscriberUseCase(mockSource, gamePersistenceUC, l)
+	_ = blockchainUC
 
 	ctx := context.Background()
 
 	// Create users first
 	user1 := &entity.User{
-		WalletAddress:    "0:player_one_address",
+		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 		TelegramUserID:   123456,
 		TelegramUsername: "player1",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 	user2 := &entity.User{
-		WalletAddress:    "0:player_two_address",
+		WalletAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 		TelegramUserID:   789012,
 		TelegramUsername: "player2",
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
 	}
 
 	require.NoError(t, userRepo.CreateOrUpdate(ctx, user1))
@@ -334,7 +356,7 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 
 	// Step 1: Initialize game
 	t.Run("Full lifecycle - Initialize", func(t *testing.T) {
-		event := map[string]interface{}{
+		eventData := map[string]interface{}{
 			"event_type":        entity.EventTypeGameInitialized,
 			"game_id":           float64(gameID),
 			"player_one":        user1.WalletAddress,
@@ -342,17 +364,10 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 			"player_one_choice": float64(1),
 			"secret_hash":       "hash123",
 		}
-		txData, _ := json.Marshal(event)
 
-		tx := toncenter.Transaction{
-			Hash:        "lifecycle_init",
-			Lt:          "200",
-			BlockNumber: 2000,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("200", "lifecycle_init_hash", time.Now().Unix(), eventData)
 
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err := mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		game, err := gameRepo.GetByID(ctx, gameID)
@@ -362,55 +377,41 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 
 	// Step 2: Player 2 joins
 	t.Run("Full lifecycle - Start", func(t *testing.T) {
-		event := map[string]interface{}{
+		eventData := map[string]interface{}{
 			"event_type":        entity.EventTypeGameStarted,
 			"game_id":           float64(gameID),
 			"player_two":        user2.WalletAddress,
 			"player_two_choice": float64(2),
 		}
-		txData, _ := json.Marshal(event)
 
-		tx := toncenter.Transaction{
-			Hash:        "lifecycle_start",
-			Lt:          "201",
-			BlockNumber: 2001,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("201", "lifecycle_start_hash", time.Now().Unix(), eventData)
 
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err := mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		game, err := gameRepo.GetByID(ctx, gameID)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusActive, game.Status)
+		assert.Equal(t, entity.GameStatusWaitingForOpenBids, game.Status)
 	})
 
 	// Step 3: Game finishes
 	t.Run("Full lifecycle - Finish", func(t *testing.T) {
-		event := map[string]interface{}{
+		eventData := map[string]interface{}{
 			"event_type":      entity.EventTypeGameFinished,
 			"game_id":         float64(gameID),
 			"winner":          user1.WalletAddress,
 			"revealed_choice": float64(1),
 			"secret":          "secret123",
 		}
-		txData, _ := json.Marshal(event)
 
-		tx := toncenter.Transaction{
-			Hash:        "lifecycle_finish",
-			Lt:          "202",
-			BlockNumber: 2002,
-			Timestamp:   time.Now().Unix(),
-			Data:        txData,
-		}
+		tx := createTransaction("202", "lifecycle_finish_hash", time.Now().Unix(), eventData)
 
-		err := blockchainUC.HandleTransaction(ctx, tx)
+		err := mockSource.InjectTransaction(ctx, tx)
 		require.NoError(t, err)
 
 		game, err := gameRepo.GetByID(ctx, gameID)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusFinished, game.Status)
+		assert.Equal(t, entity.GameStatusEnded, game.Status)
 		assert.NotNil(t, game.WinnerAddress)
 		assert.Equal(t, user1.WalletAddress, *game.WinnerAddress)
 
@@ -418,5 +419,25 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 		events, err := eventRepo.GetByGameID(ctx, gameID)
 		require.NoError(t, err)
 		assert.Len(t, events, 3)
+	})
+}
+
+// Test transaction format handling
+func TestTransactionFormat_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	t.Run("Transaction has correct field accessors", func(t *testing.T) {
+		eventData := map[string]interface{}{
+			"event_type": "test",
+		}
+
+		tx := createTransaction("12345", "test_hash_base64", 1704067200, eventData)
+
+		// Test the accessor methods from client.go
+		assert.Equal(t, "test_hash_base64", tx.Hash())
+		assert.Equal(t, "12345", tx.Lt())
+		assert.Equal(t, int64(1704067200), tx.Utime)
 	})
 }

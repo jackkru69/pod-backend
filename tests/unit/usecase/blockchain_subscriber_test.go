@@ -1,18 +1,73 @@
 package usecase_test
 
 import (
-	"context"
-	"encoding/json"
-	"testing"
-	"time"
+"context"
+"encoding/json"
+"sync/atomic"
+"testing"
+"time"
 
-	"github.com/stretchr/testify/assert"
+"github.com/stretchr/testify/assert"
 
-	"pod-backend/internal/entity"
-	"pod-backend/internal/infrastructure/toncenter"
-	"pod-backend/internal/usecase"
-	"pod-backend/pkg/logger"
+"pod-backend/internal/entity"
+"pod-backend/internal/infrastructure/toncenter"
+"pod-backend/internal/usecase"
+"pod-backend/pkg/logger"
 )
+
+// mockEventSource implements toncenter.EventSource for testing
+type mockEventSource struct {
+	handler         toncenter.EventHandler
+	lastProcessedLt string
+	isConnected     atomic.Bool
+	started         atomic.Bool
+	stopped         atomic.Bool
+}
+
+func newMockEventSource() *mockEventSource {
+	m := &mockEventSource{}
+	m.isConnected.Store(true)
+	return m
+}
+
+func (m *mockEventSource) Start(ctx context.Context) {
+	m.started.Store(true)
+	// Simulate running until context is done
+	<-ctx.Done()
+}
+
+func (m *mockEventSource) Stop() {
+	m.stopped.Store(true)
+	m.isConnected.Store(false)
+}
+
+func (m *mockEventSource) Subscribe(handler toncenter.EventHandler) {
+	m.handler = handler
+}
+
+func (m *mockEventSource) GetLastProcessedLt() string {
+	return m.lastProcessedLt
+}
+
+func (m *mockEventSource) SetLastProcessedLt(lt string) {
+	m.lastProcessedLt = lt
+}
+
+func (m *mockEventSource) IsConnected() bool {
+	return m.isConnected.Load()
+}
+
+func (m *mockEventSource) GetSourceType() string {
+	return toncenter.SourceTypeHTTP
+}
+
+// SimulateTransaction allows tests to inject transactions into the mock
+func (m *mockEventSource) SimulateTransaction(ctx context.Context, tx toncenter.Transaction) error {
+	if m.handler != nil {
+		return m.handler.HandleTransaction(ctx, tx)
+	}
+	return nil
+}
 
 // Helper function to create a test transaction
 func createTestTransaction(eventType string, gameID int64) toncenter.Transaction {
@@ -69,27 +124,23 @@ func createTestTransaction(eventType string, gameID int64) toncenter.Transaction
 func TestBlockchainSubscriberUseCase_ParseTransaction_Valid(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
 	// Create a minimal persistence UC (won't be called in this test)
-	// We're testing only the parsing logic
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+// We're testing only the parsing logic
+uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
-	// Create test transaction with valid GameInitialized event
-	tx := createTestTransaction(entity.EventTypeGameInitialized, 1)
+// Create test transaction with valid GameInitialized event
+tx := createTestTransaction(entity.EventTypeGameInitialized, 1)
 
-	// Note: We cannot directly test parseTransaction as it's private
-	// Instead, we test it through HandleTransaction and expect parse success
-	// but persistence failure (since we passed nil persistence UC)
-	ctx := context.Background()
+// Note: We cannot directly test parseTransaction as it's private
+// Instead, we test it through HandleTransaction and expect parse success
+// but persistence failure (since we passed nil persistence UC)
+ctx := context.Background()
 
-	// Act - this will parse successfully but panic at routing (nil persistenceUC)
-	// We use a recover to catch the panic and verify it's not a parse error
-	func() {
+// Act - this will parse successfully but panic at routing (nil persistenceUC)
+// We use a recover to catch the panic and verify it's not a parse error
+func() {
 		defer func() {
 			if r := recover(); r != nil {
 				// Expected panic from nil persistence UC
@@ -108,13 +159,9 @@ func TestBlockchainSubscriberUseCase_ParseTransaction_Valid(t *testing.T) {
 func TestBlockchainSubscriberUseCase_HandleTransaction_ParseError(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Create invalid transaction with malformed JSON in InMsg
 	tx := toncenter.Transaction{
@@ -147,13 +194,9 @@ func TestBlockchainSubscriberUseCase_HandleTransaction_ParseError(t *testing.T) 
 func TestBlockchainSubscriberUseCase_HandleTransaction_MissingEventType(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Create transaction without event_type
 	eventData := map[string]interface{}{
@@ -186,13 +229,9 @@ func TestBlockchainSubscriberUseCase_HandleTransaction_MissingEventType(t *testi
 func TestBlockchainSubscriberUseCase_HandleTransaction_MissingGameID(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Create transaction without game_id
 	eventData := map[string]interface{}{
@@ -225,13 +264,9 @@ func TestBlockchainSubscriberUseCase_HandleTransaction_MissingGameID(t *testing.
 func TestBlockchainSubscriberUseCase_HandleTransaction_UnknownEventType(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Create transaction with unknown event type
 	eventData := map[string]interface{}{
@@ -265,19 +300,15 @@ func TestBlockchainSubscriberUseCase_HandleTransaction_UnknownEventType(t *testi
 func TestBlockchainSubscriberUseCase_SetMetrics(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Note: We cannot create NewBlockchainMetrics() here because Prometheus metrics
 	// are registered globally and would conflict with other tests or main application.
 	// Instead, we just verify that SetMetrics doesn't panic and the method exists.
 
-	// Act & Assert - just verify SetMetrics method exists and doesn't panic with nil
+// Act & Assert - just verify SetMetrics method exists and doesn't panic with nil
 	uc.SetMetrics(nil)
 
 	// Verify the method exists by calling it - this tests the API surface
@@ -292,14 +323,9 @@ func TestBlockchainSubscriberUseCase_SetMetrics(t *testing.T) {
 func TestBlockchainSubscriberUseCase_GetLastProcessedBlock(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	startBlock := int64(100)
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, startBlock)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Act
 	lastBlock := uc.GetLastProcessedBlock()
@@ -313,13 +339,9 @@ func TestBlockchainSubscriberUseCase_GetLastProcessedBlock(t *testing.T) {
 func TestBlockchainSubscriberUseCase_SetLastProcessedBlock(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Act
 	newBlock := int64(200)
@@ -333,13 +355,9 @@ func TestBlockchainSubscriberUseCase_SetLastProcessedBlock(t *testing.T) {
 func TestBlockchainSubscriberUseCase_Subscribe(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 0)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Create a context with timeout to prevent infinite blocking
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -365,13 +383,9 @@ func TestBlockchainSubscriberUseCase_Subscribe(t *testing.T) {
 func TestBlockchainSubscriberUseCase_Lifecycle(t *testing.T) {
 	// Arrange
 	mockLogger := logger.New("debug")
-	mockClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:       "http://localhost:8082",
-		ContractAddress: "0:test",
-		HTTPTimeout:     30 * time.Second,
-	})
+	mockSource := newMockEventSource()
 
-	uc := usecase.NewBlockchainSubscriberUseCase(mockClient, nil, mockLogger, 42)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
 
 	// Assert initial state - TON uses lt, so block number is always 0
 	assert.Equal(t, int64(0), uc.GetLastProcessedBlock())
@@ -402,6 +416,39 @@ func TestBlockchainSubscriberUseCase_Lifecycle(t *testing.T) {
 	}
 
 	// Verify SetLastProcessedBlock doesn't change anything (ignored for TON)
-	uc.SetLastProcessedBlock(100)
-	assert.Equal(t, int64(0), uc.GetLastProcessedBlock())
+uc.SetLastProcessedBlock(100)
+assert.Equal(t, int64(0), uc.GetLastProcessedBlock())
+}
+
+// TestBlockchainSubscriberUseCase_GetLastProcessedLt tests lt tracking
+func TestBlockchainSubscriberUseCase_GetLastProcessedLt(t *testing.T) {
+// Arrange
+mockLogger := logger.New("debug")
+mockSource := newMockEventSource()
+
+uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+
+// Set lt via mock event source
+mockSource.SetLastProcessedLt("12345678")
+
+// Act
+lt := uc.GetLastProcessedLt()
+
+// Assert
+assert.Equal(t, "12345678", lt)
+}
+
+// TestBlockchainSubscriberUseCase_GetEventSourceType tests source type reporting
+func TestBlockchainSubscriberUseCase_GetEventSourceType(t *testing.T) {
+// Arrange
+mockLogger := logger.New("debug")
+mockSource := newMockEventSource()
+
+uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+
+// Act
+sourceType := uc.GetSourceType()
+
+// Assert
+assert.Equal(t, toncenter.SourceTypeHTTP, sourceType)
 }

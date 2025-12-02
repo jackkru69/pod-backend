@@ -6,6 +6,14 @@ import (
 	"pod-backend/internal/entity"
 )
 
+// EventSourceType represents the type of blockchain event source.
+type EventSourceType string
+
+const (
+	EventSourceWebSocket EventSourceType = "websocket"
+	EventSourceHTTP      EventSourceType = "http"
+)
+
 // BlockchainSyncStateRepository defines the interface for blockchain sync state persistence.
 // This is a singleton repository (only one row exists in the database).
 // All operations must be atomic to prevent race conditions during polling.
@@ -27,4 +35,22 @@ type BlockchainSyncStateRepository interface {
 	// GetLastProcessedBlock returns just the last processed block number.
 	// Convenience method for quick checks without loading full entity.
 	GetLastProcessedBlock(ctx context.Context) (int64, error)
+
+	// GetEventSourceType returns the current event source type (websocket or http) (T146).
+	GetEventSourceType(ctx context.Context) (EventSourceType, error)
+
+	// SetEventSourceType updates the event source type and related status (T146).
+	// Also updates websocket_connected status for WebSocket sources.
+	SetEventSourceType(ctx context.Context, sourceType EventSourceType, connected bool) error
+
+	// UpdateLastProcessedLt atomically updates the last processed logical time (lt) (T146).
+	// This operation must be atomic for TON blockchain event ordering.
+	UpdateLastProcessedLt(ctx context.Context, lt string) error
+
+	// GetLastProcessedLt returns the last processed logical time (lt) (T146).
+	GetLastProcessedLt(ctx context.Context) (string, error)
+
+	// RecordFallback increments the fallback counter and sets fallback timestamp (T146).
+	// Called when WebSocket falls back to HTTP polling.
+	RecordFallback(ctx context.Context) error
 }

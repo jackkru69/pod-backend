@@ -12,11 +12,19 @@ import (
 	"pod-backend/internal/infrastructure/toncenter"
 )
 
+// EventSourceProvider provides information about the current event source.
+// T162: Interface for health check to report event source type.
+type EventSourceProvider interface {
+	GetSourceType() string
+	IsConnected() bool
+}
+
 // HealthHandler handles health check requests
 type HealthHandler struct {
-	db              *pgxpool.Pool
-	logger          *zerolog.Logger
-	tonCenterClient *toncenter.Client
+	db                  *pgxpool.Pool
+	logger              *zerolog.Logger
+	tonCenterClient     *toncenter.Client
+	eventSourceProvider EventSourceProvider
 }
 
 // NewHealthHandler creates a new HealthHandler
@@ -28,9 +36,15 @@ func NewHealthHandler(db *pgxpool.Pool, logger *zerolog.Logger, tonCenterClient 
 	}
 }
 
+// SetEventSourceProvider sets the event source provider for health reporting.
+// T162: Allows health check to report current event source type.
+func (h *HealthHandler) SetEventSourceProvider(provider EventSourceProvider) {
+	h.eventSourceProvider = provider
+}
+
 // GetHealth godoc
 // @Summary Health check endpoint
-// @Description Returns service health status including database connectivity
+// @Description Returns service health status including database connectivity and event source type
 // @Tags health
 // @Produce json
 // @Success 200 {object} HealthResponse "Service is healthy"
@@ -75,10 +89,29 @@ func (h *HealthHandler) GetHealth(c *fiber.Ctx) error {
 		response.TonCenterAPI = "not_configured"
 	}
 
+	// Check event source type (T162: WebSocket/HTTP monitoring)
+	if h.eventSourceProvider != nil {
+		response.EventSourceType = h.eventSourceProvider.GetSourceType()
+		if h.eventSourceProvider.IsConnected() {
+			response.EventSourceStatus = "connected"
+		} else {
+			response.EventSourceStatus = "disconnected"
+			// If WebSocket is disconnected but HTTP fallback is active, mark as degraded
+			if response.EventSourceType == "http" && response.Status == "healthy" {
+				response.Status = "degraded"
+			}
+		}
+	} else {
+		response.EventSourceType = "not_configured"
+		response.EventSourceStatus = "not_configured"
+	}
+
 	h.logger.Debug().
 		Str("status", response.Status).
 		Str("database", response.Database).
 		Str("ton_center_api", response.TonCenterAPI).
+		Str("event_source_type", response.EventSourceType).
+		Str("event_source_status", response.EventSourceStatus).
 		Msg("Health check completed")
 
 	return c.JSON(response)
@@ -86,8 +119,10 @@ func (h *HealthHandler) GetHealth(c *fiber.Ctx) error {
 
 // HealthResponse represents the health check response
 type HealthResponse struct {
-	Status       string    `json:"status" enums:"healthy,degraded,unhealthy"`
-	Timestamp    time.Time `json:"timestamp"`
-	Database     string    `json:"database,omitempty" enums:"connected,disconnected,not_configured"`
-	TonCenterAPI string    `json:"ton_center_api,omitempty" enums:"connected,recovering,circuit_breaker_open,not_configured"`
+	Status            string    `json:"status" enums:"healthy,degraded,unhealthy"`
+	Timestamp         time.Time `json:"timestamp"`
+	Database          string    `json:"database,omitempty" enums:"connected,disconnected,not_configured"`
+	TonCenterAPI      string    `json:"ton_center_api,omitempty" enums:"connected,recovering,circuit_breaker_open,not_configured"`
+	EventSourceType   string    `json:"event_source_type,omitempty" enums:"websocket,http,not_configured"`
+	EventSourceStatus string    `json:"event_source_status,omitempty" enums:"connected,disconnected,not_configured"`
 }

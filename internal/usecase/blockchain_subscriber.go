@@ -17,15 +17,38 @@ import (
 // Implements FR-001 (subscribe to blockchain), FR-008 (monitor game state changes),
 // FR-019 (resilient polling).
 // T097: Integrated with Prometheus metrics for monitoring.
+// T152: Updated to use EventSource abstraction for WebSocket/HTTP flexibility.
 type BlockchainSubscriberUseCase struct {
-	poller             *toncenter.Poller
+	eventSource        toncenter.EventSource
 	persistenceUseCase *GamePersistenceUseCase
 	logger             logger.Interface
 	metrics            *metrics.BlockchainMetrics // Optional metrics (T097)
 }
 
 // NewBlockchainSubscriberUseCase creates a new blockchain subscriber use case.
+// Uses EventSource abstraction to support both WebSocket and HTTP polling (T152).
 func NewBlockchainSubscriberUseCase(
+	eventSource toncenter.EventSource,
+	persistenceUseCase *GamePersistenceUseCase,
+	logger logger.Interface,
+) *BlockchainSubscriberUseCase {
+	uc := &BlockchainSubscriberUseCase{
+		eventSource:        eventSource,
+		persistenceUseCase: persistenceUseCase,
+		logger:             logger,
+		metrics:            nil, // Set via SetMetrics
+	}
+
+	// Register this use case as the event handler
+	eventSource.Subscribe(uc)
+
+	return uc
+}
+
+// NewBlockchainSubscriberUseCaseWithPoller creates a new blockchain subscriber use case
+// with direct Poller (backward compatibility for existing code).
+// Deprecated: Use NewBlockchainSubscriberUseCase with EventSourceFactory instead.
+func NewBlockchainSubscriberUseCaseWithPoller(
 	client *toncenter.Client,
 	persistenceUseCase *GamePersistenceUseCase,
 	logger logger.Interface,
@@ -38,7 +61,8 @@ func NewBlockchainSubscriberUseCase(
 	}
 
 	// Create poller with this use case as the event handler
-	uc.poller = toncenter.NewPoller(client, uc, logger, startBlock)
+	poller := toncenter.NewPoller(client, uc, logger, startBlock)
+	uc.eventSource = poller
 
 	return uc
 }
@@ -196,33 +220,67 @@ func (uc *BlockchainSubscriberUseCase) routeEvent(ctx context.Context, event *en
 	return err
 }
 
-// Subscribe starts the blockchain polling loop.
+// Subscribe starts the blockchain event subscription.
 // Runs asynchronously until context is cancelled or Stop is called.
 // T096: Logs INFO for lifecycle events.
+// T152: Updated to use EventSource abstraction (supports WebSocket and HTTP).
 func (uc *BlockchainSubscriberUseCase) Subscribe(ctx context.Context) {
-	lastBlock := uc.poller.GetLastProcessedBlock()
-	uc.logger.Info("Starting blockchain subscription from block %d", lastBlock)
-	uc.poller.Start(ctx)
+	lastLt := uc.eventSource.GetLastProcessedLt()
+	sourceType := uc.eventSource.GetSourceType()
+	uc.logger.Info("Starting blockchain subscription via %s from lt=%s", sourceType, lastLt)
+	uc.eventSource.Start(ctx)
 }
 
-// Stop gracefully stops the blockchain polling loop.
+// Stop gracefully stops the blockchain event subscription.
 // T096: Logs INFO for lifecycle events.
+// T152: Updated to use EventSource abstraction.
 func (uc *BlockchainSubscriberUseCase) Stop() {
-	lastBlock := uc.poller.GetLastProcessedBlock()
-	uc.logger.Info("Stopping blockchain subscription at block %d", lastBlock)
-	uc.poller.Stop()
+	lastLt := uc.eventSource.GetLastProcessedLt()
+	sourceType := uc.eventSource.GetSourceType()
+	uc.logger.Info("Stopping blockchain subscription via %s at lt=%s", sourceType, lastLt)
+	uc.eventSource.Stop()
+}
+
+// GetLastProcessedLt returns the last successfully processed logical time (lt).
+// Useful for tracking progress and resuming after restart.
+// T152: Updated from block-based to lt-based tracking for TON compatibility.
+func (uc *BlockchainSubscriberUseCase) GetLastProcessedLt() string {
+	return uc.eventSource.GetLastProcessedLt()
+}
+
+// SetLastProcessedLt updates the starting logical time for event processing.
+// Useful for resuming from database state after restart.
+// T096: Logs INFO when resuming from saved state.
+// T152: Updated from block-based to lt-based tracking for TON compatibility.
+func (uc *BlockchainSubscriberUseCase) SetLastProcessedLt(lt string) {
+	uc.logger.Info("Resuming blockchain subscription from lt=%s", lt)
+	uc.eventSource.SetLastProcessedLt(lt)
+}
+
+// GetSourceType returns the type of event source being used ("websocket" or "http").
+// T152: Added for runtime monitoring and logging.
+func (uc *BlockchainSubscriberUseCase) GetSourceType() string {
+	return uc.eventSource.GetSourceType()
+}
+
+// IsConnected returns whether the event source is actively receiving events.
+// T152: Added for health check and monitoring.
+func (uc *BlockchainSubscriberUseCase) IsConnected() bool {
+	return uc.eventSource.IsConnected()
 }
 
 // GetLastProcessedBlock returns the last successfully processed block number.
-// Useful for tracking progress and resuming after restart.
+// Deprecated: Use GetLastProcessedLt() instead. TON uses logical time (lt) for ordering.
+// This method is kept for backward compatibility.
 func (uc *BlockchainSubscriberUseCase) GetLastProcessedBlock() int64 {
-	return uc.poller.GetLastProcessedBlock()
+	// For backward compatibility, return 0 as TON doesn't use block numbers
+	return 0
 }
 
 // SetLastProcessedBlock updates the starting block for polling.
-// Useful for resuming from database state after restart.
-// T096: Logs INFO when resuming from saved state.
+// Deprecated: Use SetLastProcessedLt() instead. TON uses logical time (lt) for ordering.
+// This method is kept for backward compatibility.
 func (uc *BlockchainSubscriberUseCase) SetLastProcessedBlock(block int64) {
-	uc.logger.Info("Resuming blockchain subscription from block %d", block)
-	uc.poller.SetLastProcessedBlock(block)
+	uc.logger.Warn("SetLastProcessedBlock is deprecated, use SetLastProcessedLt instead")
+	// No-op for backward compatibility
 }

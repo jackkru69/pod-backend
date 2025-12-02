@@ -191,8 +191,78 @@ The service exposes metrics at `/metrics`:
   "database": "connected",
   "ton_center": "available",
   "circuit_breaker": "closed",
-  "last_processed_block": 12345678
+  "last_processed_block": 12345678,
+  "event_source_type": "websocket"
 }
+```
+
+## WebSocket Event Streaming
+
+The backend supports two modes for receiving blockchain events from TON Center:
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BLOCKCHAIN_EVENT_SOURCE` | `http` | Event source type: `websocket` or `http` |
+| `ENABLE_WEBSOCKET` | `false` | Enable WebSocket streaming |
+| `TON_CENTER_V3_WS_URL` | - | WebSocket endpoint URL |
+| `WS_RECONNECT_MAX_ATTEMPTS` | `10` | Reconnection attempts before fallback |
+| `WS_PING_INTERVAL` | `30s` | Connection health check interval |
+
+### Mode Comparison
+
+| Feature | HTTP Polling | WebSocket |
+|---------|--------------|-----------|
+| Latency | 5-30 seconds | <2 seconds |
+| Connection | Stateless | Persistent |
+| Reliability | High | Medium |
+| Resource Usage | Higher | Lower |
+
+### Enable WebSocket (Production)
+
+```bash
+BLOCKCHAIN_EVENT_SOURCE=websocket
+ENABLE_WEBSOCKET=true
+TON_CENTER_V3_WS_URL=wss://api.toncenter.com/api/v3/websocket
+WS_RECONNECT_MAX_ATTEMPTS=10
+WS_PING_INTERVAL=30s
+```
+
+### Troubleshooting WebSocket Issues
+
+**Connection Refused**
+- Verify `TON_CENTER_V3_WS_URL` is correct
+- Check if TON Center v3 API supports WebSocket
+- Ensure firewall allows WebSocket connections
+
+**Frequent Disconnections**
+- Increase `WS_RECONNECT_MAX_ATTEMPTS`
+- Check network stability
+- Monitor `/metrics` for `websocket_reconnection_total`
+
+**Fallback to HTTP**
+- System automatically falls back after max reconnect attempts
+- Check logs for "Falling back to HTTP polling" messages
+- Monitor `/health` endpoint for `event_source_type` field
+
+**High Latency with WebSocket**
+- Check `blockchain_event_latency_seconds` metric
+- Verify TON Center API server proximity
+- Consider using geographically closer endpoint
+
+### Monitoring WebSocket Health
+
+Check Prometheus metrics:
+```promql
+# Active WebSocket connection state
+blockchain_websocket_connected
+
+# Reconnection attempts
+blockchain_websocket_reconnection_total
+
+# Message processing time
+blockchain_event_processing_duration_seconds
 ```
 
 ## Documentation

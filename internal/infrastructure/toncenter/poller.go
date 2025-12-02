@@ -2,6 +2,7 @@ package toncenter
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"pod-backend/pkg/logger"
@@ -24,8 +25,12 @@ type EventHandler interface {
 	HandleTransaction(ctx context.Context, tx Transaction) error
 }
 
+// Ensure Poller implements EventSource interface (T149)
+var _ EventSource = (*Poller)(nil)
+
 // Poller implements adaptive interval polling for blockchain events.
 // Decreases interval when activity detected, increases when idle.
+// Implements EventSource interface for abstraction (T149).
 type Poller struct {
 	client            *Client
 	handler           EventHandler
@@ -36,6 +41,7 @@ type Poller struct {
 	stopCh            chan struct{}
 	backoffDuration   time.Duration // Current exponential backoff duration (T103)
 	consecutiveErrors int           // Count for exponential backoff
+	isRunning         atomic.Bool   // Track if poller is running (T149)
 }
 
 // NewPoller creates a new adaptive blockchain poller.
@@ -55,9 +61,11 @@ func NewPoller(client *Client, handler EventHandler, logger logger.Interface, st
 // Runs in a separate goroutine until Stop() is called.
 func (p *Poller) Start(ctx context.Context) {
 	p.ticker = time.NewTicker(p.currentInterval)
+	p.isRunning.Store(true)
 
 	go func() {
 		p.logger.Info("Starting blockchain poller from lt %s", p.lastProcessedLt)
+		defer p.isRunning.Store(false)
 
 		for {
 			select {
@@ -79,6 +87,7 @@ func (p *Poller) Stop() {
 	if p.ticker != nil {
 		p.ticker.Stop()
 	}
+	p.isRunning.Store(false)
 	close(p.stopCh)
 }
 
@@ -200,4 +209,20 @@ func (p *Poller) GetLastProcessedLt() string {
 func (p *Poller) SetLastProcessedLt(lt string) {
 	p.lastProcessedLt = lt
 	p.logger.Info("Set last processed lt to %s", lt)
+}
+
+// Subscribe registers an event handler (T149).
+// For Poller, this replaces the existing handler.
+func (p *Poller) Subscribe(handler EventHandler) {
+	p.handler = handler
+}
+
+// IsConnected returns whether the poller is actively running (T149).
+func (p *Poller) IsConnected() bool {
+	return p.isRunning.Load()
+}
+
+// GetSourceType returns "http" for the HTTP polling source (T149).
+func (p *Poller) GetSourceType() string {
+	return SourceTypeHTTP
 }

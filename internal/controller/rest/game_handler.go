@@ -2,6 +2,7 @@ package rest
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
@@ -112,7 +113,8 @@ func (h *GameHandler) GetGameByID(c *fiber.Ctx) error {
 	game, err := h.gameQueryUC.GetGameByID(c.Context(), gameID)
 	if err != nil {
 		// Check if game not found or other error
-		if err.Error() == "game not found" {
+		errMsg := err.Error()
+		if errMsg == "game not found" || strings.Contains(errMsg, "no rows in result set") {
 			h.logger.Debug().
 				Int64("gameId", gameID).
 				Msg("Game not found")

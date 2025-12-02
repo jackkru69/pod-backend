@@ -30,11 +30,20 @@ func TestGETGames(t *testing.T) {
 		app := setupTestApp(t)
 		defer cleanupTestDB(t)
 
+		// Seed user first (FK constraint)
+		seedUser(t, &entity.User{
+			TelegramUserID:   123456789,
+			TelegramUsername: "player_one",
+			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		})
+
 		// Seed test data
 		seedGame(t, &entity.Game{
 			GameID:                1,
 			Status:                entity.GameStatusWaitingForOpponent,
-			PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+			PlayerOneAddress:      "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			PlayerOneChoice:       entity.CoinSideHeads,
 			BetAmount:             1000000000,
 			ServiceFeeNumerator:   100,
@@ -42,7 +51,7 @@ func TestGETGames(t *testing.T) {
 			WaitingTimeoutSeconds: 3600,
 			LowestBidAllowed:      100000000,
 			HighestBidAllowed:     10000000000,
-			FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+			FeeReceiverAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 			InitTxHash:            "abc123def456",
 			CreatedAt:             time.Now(),
 		})
@@ -121,12 +130,21 @@ func TestGETGames(t *testing.T) {
 		app := setupTestApp(t)
 		defer cleanupTestDB(t)
 
+		// Seed user first (FK constraint)
+		seedUser(t, &entity.User{
+			TelegramUserID:   123456789,
+			TelegramUsername: "player_one",
+			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		})
+
 		// Seed multiple games
 		for i := 1; i <= 5; i++ {
 			seedGame(t, &entity.Game{
 				GameID:                int64(i),
 				Status:                entity.GameStatusWaitingForOpponent,
-				PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+				PlayerOneAddress:      "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 				PlayerOneChoice:       entity.CoinSideHeads,
 				BetAmount:             1000000000,
 				ServiceFeeNumerator:   100,
@@ -134,7 +152,7 @@ func TestGETGames(t *testing.T) {
 				WaitingTimeoutSeconds: 3600,
 				LowestBidAllowed:      100000000,
 				HighestBidAllowed:     10000000000,
-				FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+				FeeReceiverAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 				InitTxHash:            "abc" + string(rune(i)),
 				CreatedAt:             time.Now(),
 			})
@@ -169,11 +187,20 @@ func TestGETGameByID(t *testing.T) {
 		app := setupTestApp(t)
 		defer cleanupTestDB(t)
 
+		// Seed user first (FK constraint)
+		seedUser(t, &entity.User{
+			TelegramUserID:   123456789,
+			TelegramUsername: "player_one",
+			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		})
+
 		// Seed test data
 		seedGame(t, &entity.Game{
 			GameID:                123,
 			Status:                entity.GameStatusWaitingForOpponent,
-			PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+			PlayerOneAddress:      "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			PlayerOneChoice:       entity.CoinSideHeads,
 			BetAmount:             1000000000,
 			ServiceFeeNumerator:   100,
@@ -181,7 +208,7 @@ func TestGETGameByID(t *testing.T) {
 			WaitingTimeoutSeconds: 3600,
 			LowestBidAllowed:      100000000,
 			HighestBidAllowed:     10000000000,
-			FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+			FeeReceiverAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 			InitTxHash:            "abc123def456",
 			CreatedAt:             time.Now(),
 		})
@@ -203,7 +230,7 @@ func TestGETGameByID(t *testing.T) {
 
 		assert.Equal(t, int64(123), game.GameID)
 		assert.Equal(t, entity.GameStatusWaitingForOpponent, game.Status)
-		assert.Equal(t, "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH", game.PlayerOneAddress)
+		assert.Equal(t, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2", game.PlayerOneAddress)
 	})
 
 	t.Run("should return 404 when game not found", func(t *testing.T) {
@@ -285,8 +312,8 @@ func TestSwaggerEndpoint(t *testing.T) {
 		err = json.Unmarshal(body, &swaggerSpec)
 		require.NoError(t, err)
 
-		// Verify OpenAPI spec structure
-		assert.Contains(t, swaggerSpec, "openapi")
+		// Verify Swagger 2.0 spec structure (not OpenAPI 3.0)
+		assert.Contains(t, swaggerSpec, "swagger")
 		assert.Contains(t, swaggerSpec, "info")
 		assert.Contains(t, swaggerSpec, "paths")
 
@@ -353,7 +380,7 @@ func setupTestApp(t *testing.T) *fiber.App {
 	cfg := &config.Config{
 		GameBackend: config.GameBackend{
 			TelegramBotToken:   "test_bot_token",
-			CORSAllowedOrigins: "*",
+			CORSAllowedOrigins: "http://localhost:3000", // Use specific origin to avoid CORS AllowCredentials + wildcard error
 		},
 		Metrics: config.Metrics{
 			Enabled: false,
@@ -392,7 +419,7 @@ func setupTestDatabase(t *testing.T) *testDatabase {
 	// Use environment variable or default to localhost
 	pgURL := os.Getenv("PG_URL")
 	if pgURL == "" {
-		pgURL = "postgres://postgres:postgres@localhost:5432/pod_test?sslmode=disable"
+		pgURL = "postgres://user:myAwEsOm3pa55%40w0rd@localhost:5433/db?sslmode=disable"
 	}
 
 	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(5))
@@ -429,6 +456,21 @@ func seedUser(t *testing.T, user *entity.User) {
 	if err != nil {
 		t.Fatalf("Failed to seed user: %v", err)
 	}
+}
+
+// seedGameWithUser creates a user for the game's player one address and then creates the game.
+// This ensures FK constraint is satisfied.
+func seedGameWithUser(t *testing.T, game *entity.Game) {
+	// Create user for player one
+	seedUser(t, &entity.User{
+		TelegramUserID:   123456789,
+		TelegramUsername: "player_one",
+		WalletAddress:    game.PlayerOneAddress,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	})
+	// Create the game
+	seedGame(t, game)
 }
 
 type mockTranslation struct{}
@@ -477,9 +519,9 @@ func TestUserProfile(t *testing.T) {
 
 		assert.Equal(t, testUser.WalletAddress, user.WalletAddress)
 		assert.Equal(t, testUser.TelegramUsername, user.TelegramUsername)
-		assert.Equal(t, int64(10), user.TotalGamesPlayed)
-		assert.Equal(t, int64(6), user.TotalWins)
-		assert.Equal(t, int64(4), user.TotalLosses)
+		assert.Equal(t, 10, user.TotalGamesPlayed)
+		assert.Equal(t, 6, user.TotalWins)
+		assert.Equal(t, 4, user.TotalLosses)
 	})
 
 	t.Run("should return 404 when user not found", func(t *testing.T) {
@@ -504,6 +546,7 @@ func TestUserGameHistory(t *testing.T) {
 		defer cleanupTestDB(t)
 
 		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		playerTwoAddress := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
 
 		// Seed user
 		testUser := &entity.User{
@@ -515,12 +558,23 @@ func TestUserGameHistory(t *testing.T) {
 		}
 		seedUser(t, testUser)
 
+		// Seed player two user for FK constraint
+		playerTwoUser := &entity.User{
+			TelegramUserID:   987654321,
+			TelegramUsername: "playertwo",
+			WalletAddress:    playerTwoAddress,
+			CreatedAt:        time.Now(),
+			UpdatedAt:        time.Now(),
+		}
+		seedUser(t, playerTwoUser)
+
 		// Seed multiple games
 		for i := 1; i <= 5; i++ {
 			game := &entity.Game{
 				GameID:                int64(i),
 				Status:                entity.GameStatusEnded,
 				PlayerOneAddress:      walletAddress,
+				PlayerTwoAddress:      &playerTwoAddress,
 				PlayerOneChoice:       entity.CoinSideHeads,
 				BetAmount:             1000000000,
 				ServiceFeeNumerator:   100,
@@ -528,7 +582,7 @@ func TestUserGameHistory(t *testing.T) {
 				WaitingTimeoutSeconds: 3600,
 				LowestBidAllowed:      100000000,
 				HighestBidAllowed:     10000000000,
-				FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+				FeeReceiverAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 				InitTxHash:            fmt.Sprintf("tx%d", i),
 				CreatedAt:             time.Now(),
 			}

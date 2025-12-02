@@ -141,7 +141,7 @@ const docTemplate = `{
         },
         "/api/v1/health": {
             "get": {
-                "description": "Returns service health status including database connectivity",
+                "description": "Returns service health status including database connectivity and event source type",
                 "produces": [
                     "application/json"
                 ],
@@ -673,6 +673,22 @@ const docTemplate = `{
                     "enum": [
                         "connected",
                         "disconnected",
+                        "not_configured"
+                    ]
+                },
+                "event_source_status": {
+                    "type": "string",
+                    "enum": [
+                        "connected",
+                        "disconnected",
+                        "not_configured"
+                    ]
+                },
+                "event_source_type": {
+                    "type": "string",
+                    "enum": [
+                        "websocket",
+                        "http",
                         "not_configured"
                     ]
                 },

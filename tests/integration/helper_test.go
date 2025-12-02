@@ -7,11 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"pod-backend/internal/entity"
+	"pod-backend/pkg/postgres"
 	"pod-backend/tests/testdata"
 )
 
@@ -21,8 +23,15 @@ import (
 // TestHelper provides utilities for integration tests
 type TestHelper struct {
 	DB        *pgxpool.Pool
+	pg        *postgres.Postgres // Wrapped postgres instance for repositories
 	Logger    *zerolog.Logger
 	CleanupFn func()
+}
+
+// Postgres returns a *postgres.Postgres wrapper for use with repositories.
+// This wrapper provides the Builder field needed by repository constructors.
+func (h *TestHelper) Postgres() *postgres.Postgres {
+	return h.pg
 }
 
 // NewTestHelper creates a new test helper with database connection
@@ -33,10 +42,13 @@ func NewTestHelper(t *testing.T) *TestHelper {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 	logger := log.Logger
 
-	// Get test database URL from environment
+	// Get test database URL from environment (check both TEST_PG_URL and PG_URL)
 	dbURL := os.Getenv("TEST_PG_URL")
 	if dbURL == "" {
-		dbURL = "postgresql://postgres:postgres@localhost:5433/pod_game_test?sslmode=disable"
+		dbURL = os.Getenv("PG_URL")
+	}
+	if dbURL == "" {
+		dbURL = "postgresql://user:myAwEsOm3pa55%40w0rd@localhost:5433/db?sslmode=disable"
 	}
 
 	// Connect to database
@@ -63,8 +75,15 @@ func NewTestHelper(t *testing.T) *TestHelper {
 
 	logger.Info().Msg("Connected to test database")
 
+	// Create postgres.Postgres wrapper for repositories
+	pg := &postgres.Postgres{
+		Pool:    pool,
+		Builder: squirrel.StatementBuilder.PlaceholderFormat(squirrel.Dollar),
+	}
+
 	helper := &TestHelper{
 		DB:     pool,
+		pg:     pg,
 		Logger: &logger,
 		CleanupFn: func() {
 			pool.Close()
@@ -117,10 +136,10 @@ func (h *TestHelper) SeedUser(t *testing.T, user *entity.User) {
 	query := `
 		INSERT INTO users (
 			wallet_address, telegram_user_id, telegram_username,
-			games_played, games_won, games_lost, win_streak,
-			total_winnings_nanotons, referral_count, referral_earnings_nanotons,
+			total_games_played, total_wins, total_losses,
+			total_referrals, total_referral_earnings,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		ON CONFLICT (wallet_address) DO NOTHING
 	`
 
@@ -128,13 +147,11 @@ func (h *TestHelper) SeedUser(t *testing.T, user *entity.User) {
 		user.WalletAddress,
 		user.TelegramUserID,
 		user.TelegramUsername,
-		user.GamesPlayed,
-		user.GamesWon,
-		user.GamesLost,
-		user.WinStreak,
-		user.TotalWinningsNanotons,
-		user.ReferralCount,
-		user.ReferralEarningsNanotons,
+		user.TotalGamesPlayed,
+		user.TotalWins,
+		user.TotalLosses,
+		user.TotalReferrals,
+		user.TotalReferralEarnings,
 		user.CreatedAt,
 		user.UpdatedAt,
 	)

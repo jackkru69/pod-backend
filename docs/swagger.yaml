@@ -180,6 +180,18 @@ definitions:
         - disconnected
         - not_configured
         type: string
+      event_source_status:
+        enum:
+        - connected
+        - disconnected
+        - not_configured
+        type: string
+      event_source_type:
+        enum:
+        - websocket
+        - http
+        - not_configured
+        type: string
       status:
         enum:
         - healthy
@@ -298,7 +310,8 @@ paths:
       - games
   /api/v1/health:
     get:
-      description: Returns service health status including database connectivity
+      description: Returns service health status including database connectivity and
+        event source type
       produces:
       - application/json
       responses:

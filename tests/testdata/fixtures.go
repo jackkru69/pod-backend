@@ -83,7 +83,7 @@ func WaitingGame() *entity.Game {
 func ActiveGame() *entity.Game {
 	return &entity.Game{
 		GameID:                2,
-		Status:                entity.GameStatusActive,
+		Status:                entity.GameStatusWaitingForOpenBids,
 		PlayerOneAddress:      "0:abc123def456789012345678901234567890123456789012345678901234567890",
 		PlayerTwoAddress:      strPtr("0:def456abc789012345678901234567890123456789012345678901234567890123"),
 		PlayerOneChoice:       1,
@@ -106,14 +106,14 @@ func ActiveGame() *entity.Game {
 func FinishedGame() *entity.Game {
 	return &entity.Game{
 		GameID:                3,
-		Status:                entity.GameStatusFinished,
+		Status:                entity.GameStatusEnded,
 		PlayerOneAddress:      "0:abc123def456789012345678901234567890123456789012345678901234567890",
 		PlayerTwoAddress:      strPtr("0:def456abc789012345678901234567890123456789012345678901234567890123"),
 		PlayerOneChoice:       1,
 		PlayerTwoChoice:       intPtr(2),
 		WinnerAddress:         strPtr("0:abc123def456789012345678901234567890123456789012345678901234567890"),
 		BetAmount:             3000000000,              // 3 TON
-		PayoutAmount:          intPtr(int(5700000000)), // 5.7 TON (after fees)
+		PayoutAmount:          int64Ptr(5700000000), // 5.7 TON (after fees)
 		ServiceFeeNumerator:   500,
 		ReferrerFeeNumerator:  100,
 		WaitingTimeoutSeconds: 300,
@@ -135,7 +135,7 @@ func FinishedGame() *entity.Game {
 func CancelledGame() *entity.Game {
 	return &entity.Game{
 		GameID:                4,
-		Status:                entity.GameStatusCancelled,
+		Status:                entity.GameStatusEnded, // Cancelled games are also ended
 		PlayerOneAddress:      "0:abc123def456789012345678901234567890123456789012345678901234567890",
 		PlayerOneChoice:       1,
 		BetAmount:             1000000000,
@@ -162,13 +162,8 @@ func GameInitializedEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeGameInitialized,
 		TransactionHash: "init_tx_hash_123",
 		BlockNumber:     1000,
-		Payload: map[string]interface{}{
-			"player_one":        "0:abc123def456789012345678901234567890123456789012345678901234567890",
-			"bet_amount":        "1000000000",
-			"player_one_choice": 1,
-			"secret_hash":       "secret_hash_123",
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"player_one":"0:abc123def456789012345678901234567890123456789012345678901234567890","bet_amount":"1000000000","player_one_choice":1,"secret_hash":"secret_hash_123"}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -180,11 +175,8 @@ func GameStartedEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeGameStarted,
 		TransactionHash: "join_tx_hash_456",
 		BlockNumber:     1001,
-		Payload: map[string]interface{}{
-			"player_two":        "0:def456abc789012345678901234567890123456789012345678901234567890123",
-			"player_two_choice": 2,
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"player_two":"0:def456abc789012345678901234567890123456789012345678901234567890123","player_two_choice":2}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -196,12 +188,8 @@ func GameFinishedEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeGameFinished,
 		TransactionHash: "complete_tx_hash_789",
 		BlockNumber:     1002,
-		Payload: map[string]interface{}{
-			"winner":          "0:abc123def456789012345678901234567890123456789012345678901234567890",
-			"revealed_choice": 1,
-			"secret":          "secret_123",
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"winner":"0:abc123def456789012345678901234567890123456789012345678901234567890","revealed_choice":1,"secret":"secret_123"}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -213,11 +201,8 @@ func DrawEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeDraw,
 		TransactionHash: "draw_tx_hash_123",
 		BlockNumber:     1003,
-		Payload: map[string]interface{}{
-			"revealed_choice": 1,
-			"secret":          "secret_456",
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"revealed_choice":1,"secret":"secret_456"}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -229,7 +214,7 @@ func GameCancelledEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeGameCancelled,
 		TransactionHash: "cancel_tx_hash_123",
 		BlockNumber:     1004,
-		Payload:         map[string]interface{}{},
+		Payload:         `{}`,
 		CreatedAt:       time.Now(),
 	}
 }
@@ -242,11 +227,8 @@ func SecretOpenedEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeSecretOpened,
 		TransactionHash: "reveal_tx_hash_789",
 		BlockNumber:     1005,
-		Payload: map[string]interface{}{
-			"secret":          "secret_123",
-			"revealed_choice": 1,
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"secret":"secret_123","revealed_choice":1}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -258,10 +240,8 @@ func InsufficientBalanceEvent() *entity.GameEvent {
 		EventType:       entity.EventTypeInsufficientBalance,
 		TransactionHash: "insufficient_balance_tx_123",
 		BlockNumber:     1006,
-		Payload: map[string]interface{}{
-			"player": "0:poor_player",
-		},
-		CreatedAt: time.Now(),
+		Payload:         `{"player":"0:poor_player"}`,
+		CreatedAt:       time.Now(),
 	}
 }
 
@@ -272,6 +252,10 @@ func strPtr(s string) *string {
 }
 
 func intPtr(i int) *int {
+	return &i
+}
+
+func int64Ptr(i int64) *int64 {
 	return &i
 }
 

@@ -13,15 +13,18 @@ import (
 
 // TONEventHandler manages the blockchain event subscription lifecycle.
 // Implements T094: Start blockchain subscription on service boot.
+// T154: Updated to use EventSourceFactory for WebSocket/HTTP flexibility.
 type TONEventHandler struct {
 	subscriberUC *usecase.BlockchainSubscriberUseCase
+	factory      *toncenter.EventSourceFactory
 	logger       logger.Interface
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
 
 // NewTONEventHandler creates a new blockchain event handler.
-// Initializes TON Center client, persistence use case, and blockchain subscriber.
+// Initializes EventSourceFactory, persistence use case, and blockchain subscriber.
+// T154: Updated to use EventSourceFactory for WebSocket/HTTP event source selection.
 func NewTONEventHandler(
 	cfg *config.Config,
 	persistenceUC *usecase.GamePersistenceUseCase,
@@ -34,22 +37,53 @@ func NewTONEventHandler(
 		logger.Warn("Failed to parse circuit breaker timeout, using default 60s: %v", err)
 	}
 
-	// Create TON Center client with circuit breaker
-	tonClient := toncenter.NewClient(toncenter.ClientConfig{
+	// Parse WebSocket ping interval
+	wsPingInterval, err := time.ParseDuration(cfg.GameBackend.WebSocketPingInterval)
+	if err != nil {
+		wsPingInterval = 30 * time.Second
+		logger.Warn("Failed to parse WebSocket ping interval, using default 30s: %v", err)
+	}
+
+	// Create EventSourceFactory with WebSocket/HTTP configuration (T154)
+	factory := toncenter.NewEventSourceFactory(toncenter.FactoryConfig{
+		// HTTP Polling Configuration
 		V2BaseURL:             cfg.GameBackend.TONCenterV2URL,
 		ContractAddress:       cfg.GameBackend.TONGameContractAddr,
 		CircuitBreakerMaxFail: cfg.GameBackend.CircuitBreakerMaxFail,
 		CircuitBreakerTimeout: circuitBreakerTimeout,
-		HTTPTimeout:           30 * time.Second, // Default HTTP timeout
-	})
+		HTTPTimeout:           30 * time.Second,
 
-	// Create blockchain subscriber use case
-	// Start from block 0 for now (TODO: persist last processed block in DB)
+		// WebSocket Configuration (T154)
+		V3WSURL:         cfg.GameBackend.TONCenterV3WSURL,
+		EnableWebSocket: cfg.GameBackend.EnableWebSocket,
+		EventSourceType: cfg.GameBackend.BlockchainEventSource,
+		MaxReconnect:    cfg.GameBackend.WebSocketReconnectMax,
+		PingInterval:    wsPingInterval,
+
+		// Fallback callback
+		OnFallback: func() {
+			logger.Warn("WebSocket event source failed, degraded to HTTP polling")
+		},
+	}, logger)
+
+	// Create a temporary handler to pass to factory
+	// The actual handler will be set in the subscriber use case
+	tempHandler := &tempEventHandler{}
+
+	// Create event source based on configuration
+	eventSource, err := factory.CreateEventSource(tempHandler)
+	if err != nil {
+		return nil, err
+	}
+
+	logger.Info("Event source created: type=%s, contract=%s",
+		eventSource.GetSourceType(), cfg.GameBackend.TONGameContractAddr)
+
+	// Create blockchain subscriber use case with EventSource (T152)
 	subscriberUC := usecase.NewBlockchainSubscriberUseCase(
-		tonClient,
+		eventSource,
 		persistenceUC,
 		logger,
-		0, // startBlock
 	)
 
 	// Create context for subscription lifecycle
@@ -57,16 +91,27 @@ func NewTONEventHandler(
 
 	return &TONEventHandler{
 		subscriberUC: subscriberUC,
+		factory:      factory,
 		logger:       logger,
 		ctx:          ctx,
 		cancel:       cancel,
 	}, nil
 }
 
+// tempEventHandler is a placeholder that gets replaced by BlockchainSubscriberUseCase.
+// This is needed because we need to create the event source before the use case.
+type tempEventHandler struct{}
+
+func (h *tempEventHandler) HandleTransaction(ctx context.Context, tx toncenter.Transaction) error {
+	// This will never be called - the real handler is registered in NewBlockchainSubscriberUseCase
+	return nil
+}
+
 // Start begins the blockchain event subscription.
 // Runs asynchronously in a separate goroutine (T094).
 func (h *TONEventHandler) Start() error {
-	h.logger.Info("Starting TON blockchain event subscription")
+	sourceType := h.factory.GetCurrentSourceType()
+	h.logger.Info("Starting TON blockchain event subscription via %s", sourceType)
 
 	// Start subscription in background
 	go h.subscriberUC.Subscribe(h.ctx)
@@ -83,17 +128,36 @@ func (h *TONEventHandler) Stop() error {
 	// Cancel subscription context
 	h.cancel()
 
-	// Stop poller
+	// Stop event source
 	h.subscriberUC.Stop()
 
 	h.logger.Info("TON blockchain event subscription stopped successfully")
 	return nil
 }
 
-// GetLastProcessedBlock returns the last successfully processed block number.
+// GetLastProcessedLt returns the last successfully processed logical time (lt).
 // Useful for health checks and monitoring.
+// T154: Updated from block-based to lt-based for TON compatibility.
+func (h *TONEventHandler) GetLastProcessedLt() string {
+	return h.subscriberUC.GetLastProcessedLt()
+}
+
+// GetLastProcessedBlock returns the last successfully processed block number.
+// Deprecated: Use GetLastProcessedLt() instead. TON uses logical time for ordering.
 func (h *TONEventHandler) GetLastProcessedBlock() int64 {
 	return h.subscriberUC.GetLastProcessedBlock()
+}
+
+// GetSourceType returns the type of event source being used ("websocket" or "http").
+// T154: Added for monitoring and health checks.
+func (h *TONEventHandler) GetSourceType() string {
+	return h.factory.GetCurrentSourceType()
+}
+
+// IsConnected returns whether the event source is actively connected.
+// T154: Added for health checks.
+func (h *TONEventHandler) IsConnected() bool {
+	return h.factory.IsConnected()
 }
 
 // SetMetrics sets the Prometheus metrics collector (T097).

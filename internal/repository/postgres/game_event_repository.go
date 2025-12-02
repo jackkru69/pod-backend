@@ -84,7 +84,7 @@ func (r *GameEventRepository) Upsert(ctx context.Context, event *entity.GameEven
 			event.Timestamp,
 			event.Payload,
 		).
-		Suffix("ON CONFLICT (transaction_hash) DO NOTHING RETURNING id, created_at").
+		Suffix("ON CONFLICT ON CONSTRAINT unique_event_per_tx DO NOTHING RETURNING id, created_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)

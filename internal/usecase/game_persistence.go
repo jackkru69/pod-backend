@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
@@ -38,6 +39,46 @@ func NewGamePersistenceUseCase(
 // This is optional - if not set, persistence works without broadcasting.
 func (uc *GamePersistenceUseCase) SetBroadcastUseCase(broadcastUC *GameBroadcastUseCase) {
 	uc.broadcastUC = broadcastUC
+}
+
+// extractInt64 extracts an int64 from event data, handling both int64 and float64 types.
+// JSON unmarshaling produces float64 for numbers, so we need to handle both.
+func extractInt64(data map[string]interface{}, key string) (int64, error) {
+	val, ok := data[key]
+	if !ok {
+		return 0, fmt.Errorf("missing %s", key)
+	}
+
+	switch v := val.(type) {
+	case int64:
+		return v, nil
+	case float64:
+		return int64(v), nil
+	case int:
+		return int64(v), nil
+	case string:
+		// Also handle string numbers (e.g., bet_amount from TON)
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("invalid %s: %w", key, err)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("invalid type for %s: %T", key, val)
+	}
+}
+
+// extractString extracts a string from event data.
+func extractString(data map[string]interface{}, key string) (string, error) {
+	val, ok := data[key]
+	if !ok {
+		return "", fmt.Errorf("missing %s", key)
+	}
+	str, ok := val.(string)
+	if !ok {
+		return "", fmt.Errorf("invalid type for %s: expected string, got %T", key, val)
+	}
+	return str, nil
 }
 
 // serializeEventData converts EventData to JSON string for Payload field.
@@ -90,35 +131,25 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeGameInitialized, event.EventType)
 	}
 
-	// Serialize EventData to Payload for persistence
-	if err := serializeEventData(event); err != nil {
-		return err
+	// Extract event data first (before creating game)
+	gameID, err := extractInt64(event.EventData, "game_id")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	// Persist event to audit trail
-	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
-		return fmt.Errorf("failed to persist event: %w", err)
+	playerOne, err := extractString(event.EventData, "player_one")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	// Extract event data
-	gameID, ok := event.EventData["game_id"].(int64)
-	if !ok {
-		return fmt.Errorf("missing or invalid game_id in event data")
+	betAmount, err := extractInt64(event.EventData, "bet_amount")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	playerOne, ok := event.EventData["player_one"].(string)
-	if !ok {
-		return fmt.Errorf("missing or invalid player_one in event data")
-	}
-
-	betAmount, ok := event.EventData["bet_amount"].(int64)
-	if !ok {
-		return fmt.Errorf("missing or invalid bet_amount in event data")
-	}
-
-	playerOneChoice, ok := event.EventData["player_one_choice"].(int64)
-	if !ok {
-		return fmt.Errorf("missing or invalid player_one_choice in event data")
+	playerOneChoice, err := extractInt64(event.EventData, "player_one_choice")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
 	// Create game entity
@@ -132,9 +163,19 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		CreatedAt:        event.Timestamp,
 	}
 
-	// Persist game (FR-001)
+	// Persist game FIRST (FR-001) - game_events has FK to games
 	if err := uc.gameRepo.Create(ctx, game); err != nil {
 		return fmt.Errorf("failed to create game: %w", err)
+	}
+
+	// Serialize EventData to Payload for persistence
+	if err := serializeEventData(event); err != nil {
+		return err
+	}
+
+	// Persist event to audit trail (after game exists due to FK)
+	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
+		return fmt.Errorf("failed to persist event: %w", err)
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
@@ -155,25 +196,25 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeGameStarted, event.EventType)
 	}
 
+	// Extract event data
+	playerTwo, err := extractString(event.EventData, "player_two")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+
+	// Update game with player 2 (FR-008) - must be done before event persistence due to FK
+	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
+		return fmt.Errorf("failed to join game: %w", err)
+	}
+
 	// Serialize EventData to Payload
 	if err := serializeEventData(event); err != nil {
 		return err
 	}
 
-	// Persist event
+	// Persist event (after game update due to FK)
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
-	}
-
-	// Extract event data
-	playerTwo, ok := event.EventData["player_two"].(string)
-	if !ok {
-		return fmt.Errorf("missing or invalid player_two in event data")
-	}
-
-	// Update game with player 2 (FR-008)
-	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
-		return fmt.Errorf("failed to join game: %w", err)
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
@@ -194,28 +235,16 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeGameFinished, event.EventType)
 	}
 
-	// Serialize EventData to Payload
-	if err := serializeEventData(event); err != nil {
-		return err
-	}
-
-	// Persist event
-	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
-		return fmt.Errorf("failed to persist event: %w", err)
-	}
-
 	// Extract event data
-	winner, ok := event.EventData["winner"].(string)
-	if !ok {
-		return fmt.Errorf("missing or invalid winner in event data")
+	winner, err := extractString(event.EventData, "winner")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	payout, ok := event.EventData["payout"].(int64)
-	if !ok {
-		return fmt.Errorf("missing or invalid payout in event data")
-	}
+	// Payout is optional, default to 0 if not provided
+	payout, _ := extractInt64(event.EventData, "payout")
 
-	// Complete game (FR-012)
+	// Complete game (FR-012) - must be done before event persistence due to FK
 	if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash); err != nil {
 		return fmt.Errorf("failed to complete game: %w", err)
 	}
@@ -273,6 +302,16 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 				return fmt.Errorf("failed to update referrer stats: %w", err)
 			}
 		}
+	}
+
+	// Serialize EventData to Payload
+	if err := serializeEventData(event); err != nil {
+		return err
+	}
+
+	// Persist event (after game update due to FK)
+	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
+		return fmt.Errorf("failed to persist event: %w", err)
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)

@@ -14,6 +14,12 @@ type BlockchainSyncState struct {
 	LastProcessedBlock int64     `json:"last_processed_block"` // Last block number successfully processed
 	LastPollTimestamp  time.Time `json:"last_poll_timestamp"`  // When the last poll occurred
 	UpdatedAt          time.Time `json:"updated_at"`           // Auto-updated on changes
+	// WebSocket event streaming fields (Phase 10)
+	EventSourceType    string     `json:"event_source_type"`    // "websocket" or "http"
+	LastProcessedLt    string     `json:"last_processed_lt"`    // Last processed logical time (lt) for TON
+	WebSocketConnected bool       `json:"websocket_connected"`  // Whether WebSocket is currently connected
+	FallbackCount      int        `json:"fallback_count"`       // Number of fallback events
+	LastFallbackAt     *time.Time `json:"last_fallback_at"`     // When last fallback occurred
 }
 
 // Validate validates the BlockchainSyncState entity.
@@ -32,6 +38,11 @@ func (s *BlockchainSyncState) Validate() error {
 
 	if s.LastProcessedBlock < 0 {
 		return errors.New("last_processed_block cannot be negative")
+	}
+
+	// Validate event source type
+	if s.EventSourceType != "" && s.EventSourceType != "websocket" && s.EventSourceType != "http" {
+		return errors.New("event_source_type must be 'websocket' or 'http'")
 	}
 
 	return nil
