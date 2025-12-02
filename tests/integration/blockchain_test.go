@@ -88,8 +88,28 @@ func (m *mockEventSource) InjectTransaction(ctx context.Context, tx toncenter.Tr
 	return handler.HandleTransaction(ctx, tx)
 }
 
+// createTransactionWithBOC creates a test transaction with BOC-encoded message.
+// Uses TestMessageBuilder to create properly formatted messages.
+func createTransactionWithBOC(lt, hash string, utime int64, inMsgJSON string) toncenter.Transaction {
+	return toncenter.Transaction{
+		Type: "raw.transaction",
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Type: "internal.transactionId",
+			Lt:   lt,
+			Hash: hash,
+		},
+		Utime: utime,
+		InMsg: json.RawMessage(inMsgJSON),
+	}
+}
+
 // createTransaction creates a test transaction with proper TON Center API v2 format.
-// The eventData is placed in InMsg (which is what parseTransaction expects).
+// DEPRECATED: Use createTransactionWithBOC for proper BOC-encoded messages.
+// This is kept for backward compatibility with tests that don't need full parsing.
 func createTransaction(lt, hash string, utime int64, eventData map[string]interface{}) toncenter.Transaction {
 	inMsgData, _ := json.Marshal(eventData)
 	return toncenter.Transaction{

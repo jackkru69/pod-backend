@@ -16,9 +16,10 @@ const (
 
 // Coin side constants (MUST match smart contract)
 const (
-	CoinSideClosed = 1 // Unrevealed choice (encrypted)
-	CoinSideHeads  = 2 // HEADS
-	CoinSideTails  = 3 // TAILS
+	CoinSideUnknown = 0 // Choice not yet revealed (used during initialization)
+	CoinSideClosed  = 1 // Unrevealed choice (encrypted)
+	CoinSideHeads   = 2 // HEADS
+	CoinSideTails   = 3 // TAILS
 )
 
 // Game represents a single coin flip gambling game instance.
@@ -69,8 +70,8 @@ func (g *Game) Validate() error {
 		return errors.New("bet_amount must be positive")
 	}
 
-	if g.PlayerOneChoice < CoinSideClosed || g.PlayerOneChoice > CoinSideTails {
-		return errors.New("player_one_choice must be 1-3")
+	if g.PlayerOneChoice < CoinSideUnknown || g.PlayerOneChoice > CoinSideTails {
+		return errors.New("player_one_choice must be 0-3")
 	}
 
 	// Status-dependent validation

@@ -147,17 +147,16 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	playerOneChoice, err := extractInt64(event.EventData, "player_one_choice")
-	if err != nil {
-		return fmt.Errorf("invalid event data: %w", err)
-	}
+	// player_one_choice is optional - may not be present in GameInitializedNotify
+	// (in TON contract, the choice is hidden in the secret hash)
+	playerOneChoice, _ := extractInt64(event.EventData, "player_one_choice")
 
 	// Create game entity
 	game := &entity.Game{
 		GameID:           gameID,
 		Status:           entity.GameStatusWaitingForOpponent,
 		PlayerOneAddress: playerOne,
-		PlayerOneChoice:  int(playerOneChoice),
+		PlayerOneChoice:  int(playerOneChoice), // Will be 0 if not present
 		BetAmount:        betAmount,
 		InitTxHash:       event.TransactionHash,
 		CreatedAt:        event.Timestamp,
