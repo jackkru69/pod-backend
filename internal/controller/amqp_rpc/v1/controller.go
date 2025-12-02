@@ -1,9 +1,9 @@
 package v1
 
 import (
+	"github.com/go-playground/validator/v10"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
-	"github.com/go-playground/validator/v10"
 )
 
 // V1 -.

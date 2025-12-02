@@ -3,9 +3,9 @@ package v1
 import (
 	"net/http"
 
+	"github.com/gofiber/fiber/v2"
 	"pod-backend/internal/controller/http/v1/request"
 	"pod-backend/internal/entity"
-	"github.com/gofiber/fiber/v2"
 )
 
 // @Summary     Show history

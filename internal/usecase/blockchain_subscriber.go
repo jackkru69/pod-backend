@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"pod-backend/internal/entity"
+	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/infrastructure/toncenter"
 	"pod-backend/pkg/logger"
 )
@@ -15,10 +16,12 @@ import (
 // to GamePersistenceUseCase for processing.
 // Implements FR-001 (subscribe to blockchain), FR-008 (monitor game state changes),
 // FR-019 (resilient polling).
+// T097: Integrated with Prometheus metrics for monitoring.
 type BlockchainSubscriberUseCase struct {
 	poller             *toncenter.Poller
 	persistenceUseCase *GamePersistenceUseCase
 	logger             logger.Interface
+	metrics            *metrics.BlockchainMetrics // Optional metrics (T097)
 }
 
 // NewBlockchainSubscriberUseCase creates a new blockchain subscriber use case.
@@ -31,6 +34,7 @@ func NewBlockchainSubscriberUseCase(
 	uc := &BlockchainSubscriberUseCase{
 		persistenceUseCase: persistenceUseCase,
 		logger:             logger,
+		metrics:            nil, // Set via SetMetrics
 	}
 
 	// Create poller with this use case as the event handler
@@ -39,10 +43,19 @@ func NewBlockchainSubscriberUseCase(
 	return uc
 }
 
+// SetMetrics sets the Prometheus metrics collector (T097).
+// This is optional - if not set, metrics collection is disabled.
+func (uc *BlockchainSubscriberUseCase) SetMetrics(m *metrics.BlockchainMetrics) {
+	uc.metrics = m
+}
+
 // HandleTransaction implements toncenter.EventHandler interface.
 // Parses blockchain transaction into GameEvent and routes to appropriate handler.
 // T096: Comprehensive logging (INFO for events, ERROR for persistence, WARN for validation)
+// T097: Prometheus metrics for monitoring
 func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx toncenter.Transaction) error {
+	startTime := time.Now()
+
 	uc.logger.Info("Received blockchain transaction hash=%s block=%d lt=%s",
 		tx.Hash, tx.BlockNumber, tx.Lt)
 
@@ -51,7 +64,15 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 	if err != nil {
 		uc.logger.Warn("Failed to parse transaction hash=%s block=%d: %v",
 			tx.Hash, tx.BlockNumber, err)
+		if uc.metrics != nil {
+			uc.metrics.RecordEventFailed("unknown", "parse_error")
+		}
 		return fmt.Errorf("failed to parse transaction: %w", err)
+	}
+
+	// Record event received (T097)
+	if uc.metrics != nil {
+		uc.metrics.RecordEventReceived(event.EventType)
 	}
 
 	uc.logger.Info("Parsed %s event for game_id=%d from transaction hash=%s",
@@ -61,11 +82,21 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 	if err := uc.routeEvent(ctx, event); err != nil {
 		uc.logger.Error("Failed to persist %s event for game_id=%d: %v",
 			event.EventType, event.GameID, err)
+		if uc.metrics != nil {
+			uc.metrics.RecordEventFailed(event.EventType, "persistence_error")
+		}
 		return fmt.Errorf("failed to route event: %w", err)
 	}
 
-	uc.logger.Info("Successfully processed %s event for game_id=%d (tx=%s, block=%d)",
-		event.EventType, event.GameID, event.TransactionHash, event.BlockNumber)
+	// Record successful processing (T097)
+	duration := time.Since(startTime)
+	if uc.metrics != nil {
+		uc.metrics.RecordEventProcessed(event.EventType, duration)
+		uc.metrics.UpdateLastProcessedBlock(event.BlockNumber)
+	}
+
+	uc.logger.Info("Successfully processed %s event for game_id=%d (tx=%s, block=%d, duration=%v)",
+		event.EventType, event.GameID, event.TransactionHash, event.BlockNumber, duration)
 
 	return nil
 }

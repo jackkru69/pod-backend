@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"pod-backend/config"
+	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/infrastructure/toncenter"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
@@ -35,11 +36,11 @@ func NewTONEventHandler(
 
 	// Create TON Center client with circuit breaker
 	tonClient := toncenter.NewClient(toncenter.ClientConfig{
-		V2BaseURL:              cfg.GameBackend.TONCenterV2URL,
-		ContractAddress:        cfg.GameBackend.TONGameContractAddr,
-		CircuitBreakerMaxFail:  cfg.GameBackend.CircuitBreakerMaxFail,
-		CircuitBreakerTimeout:  circuitBreakerTimeout,
-		HTTPTimeout:            30 * time.Second, // Default HTTP timeout
+		V2BaseURL:             cfg.GameBackend.TONCenterV2URL,
+		ContractAddress:       cfg.GameBackend.TONGameContractAddr,
+		CircuitBreakerMaxFail: cfg.GameBackend.CircuitBreakerMaxFail,
+		CircuitBreakerTimeout: circuitBreakerTimeout,
+		HTTPTimeout:           30 * time.Second, // Default HTTP timeout
 	})
 
 	// Create blockchain subscriber use case
@@ -93,4 +94,11 @@ func (h *TONEventHandler) Stop() error {
 // Useful for health checks and monitoring.
 func (h *TONEventHandler) GetLastProcessedBlock() int64 {
 	return h.subscriberUC.GetLastProcessedBlock()
+}
+
+// SetMetrics sets the Prometheus metrics collector (T097).
+// Delegates to the underlying BlockchainSubscriberUseCase.
+func (h *TONEventHandler) SetMetrics(m *metrics.BlockchainMetrics) {
+	h.subscriberUC.SetMetrics(m)
+	h.logger.Info("Blockchain metrics enabled")
 }

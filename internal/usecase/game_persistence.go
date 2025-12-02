@@ -14,10 +14,10 @@ import (
 // FR-011 (validate blockchain data), FR-012 (store outcomes).
 // T093: Integrated with GameBroadcastUseCase for real-time WebSocket updates.
 type GamePersistenceUseCase struct {
-	gameRepo        repository.GameRepository
-	eventRepo       repository.GameEventRepository
-	userRepo        repository.UserRepository
-	broadcastUC     *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
+	gameRepo    repository.GameRepository
+	eventRepo   repository.GameEventRepository
+	userRepo    repository.UserRepository
+	broadcastUC *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -123,13 +123,13 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 
 	// Create game entity
 	game := &entity.Game{
-		GameID:            gameID,
-		Status:            entity.GameStatusWaitingForOpponent,
-		PlayerOneAddress:  playerOne,
-		PlayerOneChoice:   int(playerOneChoice),
-		BetAmount:         betAmount,
-		InitTxHash:        event.TransactionHash,
-		CreatedAt:         event.Timestamp,
+		GameID:           gameID,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: playerOne,
+		PlayerOneChoice:  int(playerOneChoice),
+		BetAmount:        betAmount,
+		InitTxHash:       event.TransactionHash,
+		CreatedAt:        event.Timestamp,
 	}
 
 	// Persist game (FR-001)

@@ -32,19 +32,19 @@ func TestGETGames(t *testing.T) {
 
 		// Seed test data
 		seedGame(t, &entity.Game{
-			GameID:           1,
-			Status:           entity.GameStatusWaitingForOpponent,
-			PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
-			PlayerOneChoice:  entity.CoinSideHeads,
-			BetAmount:        1000000000,
-			ServiceFeeNumerator: 100,
-			ReferrerFeeNumerator: 50,
+			GameID:                1,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
 			WaitingTimeoutSeconds: 3600,
-			LowestBidAllowed: 100000000,
-			HighestBidAllowed: 10000000000,
-			FeeReceiverAddress: "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
-			InitTxHash:       "abc123def456",
-			CreatedAt:        time.Now(),
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+			InitTxHash:            "abc123def456",
+			CreatedAt:             time.Now(),
 		})
 
 		// Act
@@ -124,19 +124,19 @@ func TestGETGames(t *testing.T) {
 		// Seed multiple games
 		for i := 1; i <= 5; i++ {
 			seedGame(t, &entity.Game{
-				GameID:           int64(i),
-				Status:           entity.GameStatusWaitingForOpponent,
-				PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
-				PlayerOneChoice:  entity.CoinSideHeads,
-				BetAmount:        1000000000,
-				ServiceFeeNumerator: 100,
-				ReferrerFeeNumerator: 50,
+				GameID:                int64(i),
+				Status:                entity.GameStatusWaitingForOpponent,
+				PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+				PlayerOneChoice:       entity.CoinSideHeads,
+				BetAmount:             1000000000,
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
 				WaitingTimeoutSeconds: 3600,
-				LowestBidAllowed: 100000000,
-				HighestBidAllowed: 10000000000,
-				FeeReceiverAddress: "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
-				InitTxHash:       "abc" + string(rune(i)),
-				CreatedAt:        time.Now(),
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+				InitTxHash:            "abc" + string(rune(i)),
+				CreatedAt:             time.Now(),
 			})
 		}
 
@@ -171,19 +171,19 @@ func TestGETGameByID(t *testing.T) {
 
 		// Seed test data
 		seedGame(t, &entity.Game{
-			GameID:           123,
-			Status:           entity.GameStatusWaitingForOpponent,
-			PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
-			PlayerOneChoice:  entity.CoinSideHeads,
-			BetAmount:        1000000000,
-			ServiceFeeNumerator: 100,
-			ReferrerFeeNumerator: 50,
+			GameID:                123,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH",
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
 			WaitingTimeoutSeconds: 3600,
-			LowestBidAllowed: 100000000,
-			HighestBidAllowed: 10000000000,
-			FeeReceiverAddress: "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
-			InitTxHash:       "abc123def456",
-			CreatedAt:        time.Now(),
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    "EQXyzabcdefghijklmnopqrstuvwxyz0123456789ABCDE",
+			InitTxHash:            "abc123def456",
+			CreatedAt:             time.Now(),
 		})
 
 		// Act

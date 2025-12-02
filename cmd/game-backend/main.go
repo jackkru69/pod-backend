@@ -21,14 +21,19 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
+	"pod-backend/config"
+	blockchainctrl "pod-backend/internal/controller/blockchain"
 	"pod-backend/internal/controller/rest"
 	websocketctrl "pod-backend/internal/controller/websocket"
+	"pod-backend/internal/infrastructure/metrics"
+	"pod-backend/internal/infrastructure/toncenter"
 	repopg "pod-backend/internal/repository/postgres"
 	"pod-backend/internal/usecase"
+	pkglogger "pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
 )
 
-// Prometheus metrics (T059)
+// Prometheus metrics (T059, T121)
 var (
 	wsActiveConnections = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "websocket_active_connections",
@@ -51,6 +56,22 @@ var (
 		},
 		[]string{"method", "path"},
 	)
+
+	// Database connection pool metrics (T121)
+	dbConnectionsActive = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "db_connections_active",
+		Help: "Number of active database connections in use",
+	})
+
+	dbConnectionsIdle = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "db_connections_idle",
+		Help: "Number of idle database connections in pool",
+	})
+
+	dbConnectionsTotal = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "db_connections_total",
+		Help: "Total number of database connections in pool",
+	})
 )
 
 func main() {
@@ -61,10 +82,16 @@ func main() {
 	log.Info().Msg("Starting Game Backend Service")
 
 	// Load configuration from environment
-	cfg := loadConfig()
+	appCfg, err := config.NewConfig()
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load configuration")
+	}
+
+	// Initialize structured logger with config level
+	l := pkglogger.New(appCfg.Log.Level)
 
 	// Initialize PostgreSQL connection pool
-	pg, err := initDatabase(cfg.DatabaseURL)
+	pg, err := postgres.New(appCfg.PG.URL, postgres.MaxPoolSize(appCfg.PG.PoolMax))
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
 	}
@@ -75,12 +102,47 @@ func main() {
 	// Initialize repositories
 	gameRepo := repopg.NewGameRepository(pg)
 	userRepo := repopg.NewUserRepository(pg)
-	_ = gameRepo // Will be used for queries
+	eventRepo := repopg.NewGameEventRepository(pg)
 
 	// Initialize use cases
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
 	gameBroadcastUC := usecase.NewGameBroadcastUseCase()
 	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
+
+	// Initialize TON Center client for blockchain monitoring and health checks
+	circuitBreakerTimeout, err := time.ParseDuration(appCfg.GameBackend.CircuitBreakerTimeout)
+	if err != nil {
+		circuitBreakerTimeout = 60 * time.Second
+		log.Warn().Err(err).Msg("Failed to parse circuit breaker timeout, using default 60s")
+	}
+
+	var tonClient *toncenter.Client
+	if appCfg.GameBackend.TONGameContractAddr != "" {
+		tonClient = toncenter.NewClient(toncenter.ClientConfig{
+			V2BaseURL:             appCfg.GameBackend.TONCenterV2URL,
+			ContractAddress:       appCfg.GameBackend.TONGameContractAddr,
+			CircuitBreakerMaxFail: appCfg.GameBackend.CircuitBreakerMaxFail,
+			CircuitBreakerTimeout: circuitBreakerTimeout,
+			HTTPTimeout:           30 * time.Second,
+		})
+		log.Info().Str("contract", appCfg.GameBackend.TONGameContractAddr).Msg("TON Center client initialized")
+	}
+
+	// Initialize blockchain persistence use case (T093)
+	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
+	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC) // Wire WebSocket broadcasting
+
+	// Initialize blockchain metrics (T097)
+	blockchainMetrics := metrics.NewBlockchainMetrics()
+
+	// Initialize blockchain event handler (T094, T095)
+	blockchainHandler, err := blockchainctrl.NewTONEventHandler(appCfg, gamePersistenceUC, l)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to initialize blockchain event handler")
+	}
+
+	// Wire metrics into blockchain subscriber (T097)
+	blockchainHandler.SetMetrics(blockchainMetrics)
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -98,7 +160,7 @@ func main() {
 
 	// CORS middleware (FR-027)
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     cfg.CORSAllowedOrigins,
+		AllowOrigins:     appCfg.GameBackend.CORSAllowedOrigins,
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Origin,Content-Type,Accept,Authorization,X-Telegram-Init-Data",
 		AllowCredentials: true,
@@ -109,7 +171,7 @@ func main() {
 	app.Use(prometheusMiddleware)
 
 	// Health check endpoint
-	healthHandler := rest.NewHealthHandler(pg.Pool, &log.Logger)
+	healthHandler := rest.NewHealthHandler(pg.Pool, &log.Logger, tonClient)
 	app.Get("/health", healthHandler.GetHealth)
 
 	// Prometheus metrics endpoint
@@ -142,13 +204,19 @@ func main() {
 	// Start WebSocket connection count updater (T059)
 	go updateWebSocketMetrics(gameBroadcastUC)
 
+	// Start blockchain event subscription (T095)
+	if err := blockchainHandler.Start(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to start blockchain event handler")
+	}
+	log.Info().Msg("Blockchain event subscription started")
+
 	// Graceful shutdown handler (T061)
 	shutdownChan := make(chan os.Signal, 1)
 	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 
 	// Start server in goroutine
 	go func() {
-		addr := fmt.Sprintf(":%s", cfg.Port)
+		addr := fmt.Sprintf(":%s", appCfg.HTTP.Port)
 		log.Info().Str("address", addr).Msg("Starting HTTP server")
 		if err := app.Listen(addr); err != nil {
 			log.Fatal().Err(err).Msg("Failed to start server")
@@ -163,6 +231,12 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Stop blockchain event subscription (T095)
+	log.Info().Msg("Stopping blockchain event subscription")
+	if err := blockchainHandler.Stop(); err != nil {
+		log.Error().Err(err).Msg("Error during blockchain handler shutdown")
+	}
+
 	// Close all WebSocket connections (T061)
 	log.Info().Msg("Closing all WebSocket connections")
 	if err := wsHandler.Shutdown(); err != nil {
@@ -176,48 +250,6 @@ func main() {
 	}
 
 	log.Info().Msg("Game Backend Service stopped gracefully")
-}
-
-// Config holds application configuration
-type Config struct {
-	Port               string
-	DatabaseURL        string
-	CORSAllowedOrigins string
-}
-
-// loadConfig loads configuration from environment variables
-func loadConfig() *Config {
-	return &Config{
-		Port:               getEnv("PORT", "3000"),
-		DatabaseURL:        getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/gamedb?sslmode=disable"),
-		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"),
-	}
-}
-
-// getEnv gets environment variable with default value
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// initDatabase initializes PostgreSQL connection using pkg/postgres
-func initDatabase(dbURL string) (*postgres.Postgres, error) {
-	pg, err := postgres.New(dbURL, postgres.MaxPoolSize(25))
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize postgres: %w", err)
-	}
-
-	// Test connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := pg.Pool.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	return pg, nil
 }
 
 // customErrorHandler handles Fiber errors

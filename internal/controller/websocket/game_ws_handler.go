@@ -16,10 +16,10 @@ import (
 
 // GameWebSocketHandler handles WebSocket connections for game updates
 type GameWebSocketHandler struct {
-	gameRepo          repository.GameRepository
-	broadcastUseCase  *usecase.GameBroadcastUseCase
-	pingInterval      time.Duration
-	pongWait          time.Duration
+	gameRepo         repository.GameRepository
+	broadcastUseCase *usecase.GameBroadcastUseCase
+	pingInterval     time.Duration
+	pongWait         time.Duration
 }
 
 // NewGameWebSocketHandler creates a new WebSocket handler
@@ -30,8 +30,8 @@ func NewGameWebSocketHandler(
 	return &GameWebSocketHandler{
 		gameRepo:         gameRepo,
 		broadcastUseCase: broadcastUseCase,
-		pingInterval:     30 * time.Second,  // Send ping every 30 seconds
-		pongWait:         60 * time.Second,  // Wait up to 60 seconds for pong
+		pingInterval:     30 * time.Second, // Send ping every 30 seconds
+		pongWait:         60 * time.Second, // Wait up to 60 seconds for pong
 	}
 }
 

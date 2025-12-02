@@ -1,10 +1,10 @@
 package v1
 
 import (
+	"github.com/go-playground/validator/v10"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/nats/nats_rpc/server"
-	"github.com/go-playground/validator/v10"
 )
 
 // NewTranslationRoutes -.

@@ -35,7 +35,7 @@ type Poller struct {
 	ticker             *time.Ticker
 	stopCh             chan struct{}
 	backoffDuration    time.Duration // Current exponential backoff duration (T103)
-	consecutiveErrors  int            // Count for exponential backoff
+	consecutiveErrors  int           // Count for exponential backoff
 }
 
 // NewPoller creates a new adaptive blockchain poller.

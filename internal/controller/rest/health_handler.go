@@ -14,8 +14,8 @@ import (
 
 // HealthHandler handles health check requests
 type HealthHandler struct {
-	db            *pgxpool.Pool
-	logger        *zerolog.Logger
+	db              *pgxpool.Pool
+	logger          *zerolog.Logger
 	tonCenterClient *toncenter.Client
 }
 

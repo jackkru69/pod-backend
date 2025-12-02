@@ -115,12 +115,12 @@ func TestWebSocketUpgrade(t *testing.T) {
 
 // mockWebSocketClient simulates a WebSocket client for testing
 type mockWebSocketClient struct {
-	conn          *websocket.Conn
-	messagesRecv  [][]byte
-	mu            sync.Mutex
-	ctx           context.Context
-	cancel        context.CancelFunc
-	readDone      chan struct{}
+	conn         *websocket.Conn
+	messagesRecv [][]byte
+	mu           sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+	readDone     chan struct{}
 }
 
 func newMockWebSocketClient(url string) (*mockWebSocketClient, error) {

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"pod-backend/pkg/nats/nats_rpc/server"
 	"github.com/nats-io/nats.go"
+	"pod-backend/pkg/nats/nats_rpc/server"
 )
 
 func (r *V1) getHistory() server.CallHandler {

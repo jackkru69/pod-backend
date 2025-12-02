@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"pod-backend/pkg/rabbitmq/rmq_rpc/server"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"pod-backend/pkg/rabbitmq/rmq_rpc/server"
 )
 
 func (r *V1) getHistory() server.CallHandler {

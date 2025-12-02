@@ -9,11 +9,11 @@ import (
 // This is a singleton entity (only one row exists in the database).
 // Updated atomically after each successful poll batch.
 type BlockchainSyncState struct {
-	ID                  int       `json:"id"`                    // Always 1 (singleton)
-	ContractAddress     string    `json:"contract_address"`      // TON contract being monitored
-	LastProcessedBlock  int64     `json:"last_processed_block"`  // Last block number successfully processed
-	LastPollTimestamp   time.Time `json:"last_poll_timestamp"`   // When the last poll occurred
-	UpdatedAt           time.Time `json:"updated_at"`            // Auto-updated on changes
+	ID                 int       `json:"id"`                   // Always 1 (singleton)
+	ContractAddress    string    `json:"contract_address"`     // TON contract being monitored
+	LastProcessedBlock int64     `json:"last_processed_block"` // Last block number successfully processed
+	LastPollTimestamp  time.Time `json:"last_poll_timestamp"`  // When the last poll occurred
+	UpdatedAt          time.Time `json:"updated_at"`           // Auto-updated on changes
 }
 
 // Validate validates the BlockchainSyncState entity.

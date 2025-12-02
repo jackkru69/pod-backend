@@ -22,11 +22,11 @@ type Client struct {
 
 // ClientConfig holds configuration for TON Center client.
 type ClientConfig struct {
-	V2BaseURL              string
-	ContractAddress        string
-	CircuitBreakerMaxFail  int
-	CircuitBreakerTimeout  time.Duration
-	HTTPTimeout            time.Duration
+	V2BaseURL             string
+	ContractAddress       string
+	CircuitBreakerMaxFail int
+	CircuitBreakerTimeout time.Duration
+	HTTPTimeout           time.Duration
 }
 
 // NewClient creates a new TON Center API client with circuit breaker.
@@ -61,9 +61,9 @@ type Transaction struct {
 
 // TransactionsResponse represents the API response for transaction queries.
 type TransactionsResponse struct {
-	OK          bool          `json:"ok"`
-	Result      []Transaction `json:"result"`
-	Error       string        `json:"error,omitempty"`
+	OK     bool          `json:"ok"`
+	Result []Transaction `json:"result"`
+	Error  string        `json:"error,omitempty"`
 }
 
 // GetTransactions retrieves transactions for the contract starting from a specific block.
