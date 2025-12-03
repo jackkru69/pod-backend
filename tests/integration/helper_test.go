@@ -96,6 +96,11 @@ func NewTestHelper(t *testing.T) *TestHelper {
 	return helper
 }
 
+// Int64Ptr returns a pointer to int64 value (helper for nullable fields)
+func Int64Ptr(v int64) *int64 {
+	return &v
+}
+
 // Cleanup closes connections and cleans up resources
 func (h *TestHelper) Cleanup() {
 	if h.CleanupFn != nil {

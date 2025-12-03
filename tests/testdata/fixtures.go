@@ -12,10 +12,11 @@ import (
 
 // ValidUser returns a valid user for testing
 func ValidUser() *entity.User {
+	telegramID := int64(12345678)
 	return &entity.User{
 		ID:                    1,
 		WalletAddress:         "EQabc123def456789012345678901234567890123456789",
-		TelegramUserID:        12345678,
+		TelegramUserID:        &telegramID,
 		TelegramUsername:      "testuser",
 		TotalGamesPlayed:      10,
 		TotalWins:             5,
@@ -43,10 +44,11 @@ func EmptyWalletUser() *entity.User {
 
 // NewUser returns a user with no games played
 func NewUser() *entity.User {
+	telegramID := int64(87654321)
 	return &entity.User{
 		ID:                    2,
 		WalletAddress:         "EQdef456abc789012345678901234567890123456789012",
-		TelegramUserID:        87654321,
+		TelegramUserID:        &telegramID,
 		TelegramUsername:      "newuser",
 		TotalGamesPlayed:      0,
 		TotalWins:             0,

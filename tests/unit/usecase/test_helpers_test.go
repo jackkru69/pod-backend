@@ -96,6 +96,11 @@ func (m *MockGameRepository) Exists(ctx context.Context, gameID int64) (bool, er
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockGameRepository) CreateOrIgnore(ctx context.Context, game *entity.Game) (bool, error) {
+	args := m.Called(ctx, game)
+	return args.Bool(0), args.Error(1)
+}
+
 // MockUserRepository implements repository.UserRepository for testing
 type MockUserRepository struct {
 	mock.Mock
@@ -108,6 +113,11 @@ func (m *MockUserRepository) Create(ctx context.Context, user *entity.User) erro
 
 func (m *MockUserRepository) CreateOrUpdate(ctx context.Context, user *entity.User) error {
 	args := m.Called(ctx, user)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) EnsureUserByWallet(ctx context.Context, walletAddress string) error {
+	args := m.Called(ctx, walletAddress)
 	return args.Error(0)
 }
 

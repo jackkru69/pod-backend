@@ -169,7 +169,7 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 
 		// Create user first (FK constraint: games.player_one_address -> users.wallet_address)
 		testUser := &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "player_one",
 			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			CreatedAt:        time.Now(),
@@ -212,7 +212,7 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 	t.Run("GameStarted event updates game status", func(t *testing.T) {
 		// Create player_two user (FK constraint)
 		playerTwo := &entity.User{
-			TelegramUserID:   987654321,
+			TelegramUserID:   Int64Ptr(987654321),
 			TelegramUsername: "player_two",
 			WalletAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
 			CreatedAt:        time.Now(),
@@ -356,14 +356,14 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 	// Create users first
 	user1 := &entity.User{
 		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
-		TelegramUserID:   123456,
+		TelegramUserID:   Int64Ptr(123456),
 		TelegramUsername: "player1",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),
 	}
 	user2 := &entity.User{
 		WalletAddress:    "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X",
-		TelegramUserID:   789012,
+		TelegramUserID:   Int64Ptr(789012),
 		TelegramUsername: "player2",
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),

@@ -17,8 +17,9 @@ import (
 func TestHandleGameInitialized_Success(t *testing.T) {
 	mockGameRepo := new(MockGameRepository)
 	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
-	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
@@ -34,14 +35,17 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 		},
 	}
 
+	// Expect user to be ensured for FK constraint
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+
 	// Expect game to be created with status WAITING_FOR_OPPONENT (1) - called FIRST
-	mockGameRepo.On("Create", mock.Anything, mock.MatchedBy(func(g *entity.Game) bool {
+	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.MatchedBy(func(g *entity.Game) bool {
 		return g.GameID == 123 &&
 			g.Status == entity.GameStatusWaitingForOpponent &&
 			g.PlayerOneAddress == "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2" &&
 			g.BetAmount == 1000000000 &&
 			g.PlayerOneChoice == 1
-	})).Return(nil)
+	})).Return(true, nil)
 
 	// Expect event to be persisted - called SECOND
 	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
@@ -51,6 +55,7 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 	assert.NoError(t, err)
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
 }
 
 // TestHandleGameInitialized_ValidationError tests validation of invalid event data
@@ -79,8 +84,9 @@ func TestHandleGameInitialized_ValidationError(t *testing.T) {
 func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 	mockGameRepo := new(MockGameRepository)
 	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
-	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
@@ -96,15 +102,19 @@ func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 		},
 	}
 
+	// Expect user to be ensured for FK constraint
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+
 	// Note: HandleGameInitialized creates game FIRST, then upserts event
-	// So if Create fails, Upsert should not be called
-	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("database error"))
+	// So if CreateOrIgnore fails, Upsert should not be called
+	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(false, errors.New("database error"))
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database error")
 	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
 	// eventRepo.Upsert should NOT be called since Create failed first
 }
 
@@ -112,8 +122,9 @@ func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 func TestHandleGameStarted_Success(t *testing.T) {
 	mockGameRepo := new(MockGameRepository)
 	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
-	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameStarted,
@@ -128,6 +139,9 @@ func TestHandleGameStarted_Success(t *testing.T) {
 		},
 	}
 
+	// Expect user to be ensured for FK constraint
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQAnotherPlayerWalletAddress123456789012345678").Return(nil)
+
 	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
 	mockGameRepo.On("JoinGame", mock.Anything, int64(123), "EQAnotherPlayerWalletAddress123456789012345678", "tx_start_123").Return(nil)
 
@@ -136,6 +150,7 @@ func TestHandleGameStarted_Success(t *testing.T) {
 	assert.NoError(t, err)
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
 }
 
 // TestHandleGameFinished_Success tests successful game completion with winner
@@ -241,8 +256,9 @@ func TestHandleDraw_Success(t *testing.T) {
 func TestDuplicateEvent_Idempotent(t *testing.T) {
 	mockGameRepo := new(MockGameRepository)
 	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
 
-	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, nil)
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
@@ -258,25 +274,27 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 		},
 	}
 
+	// Both calls need EnsureUserByWallet
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+
 	// First call - should process normally
 	// Order: Create game first, then Upsert event
-	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(nil).Once()
+	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(true, nil).Once()
 	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil).Once()
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 	assert.NoError(t, err)
 
-	// Second call with same tx hash - game Create will fail at DB level first
-	// The DB constraint (unique game_id) will prevent duplicate game creation
-	// Since Create fails first, Upsert will NOT be called
-	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("duplicate key value violates unique constraint")).Once()
+	// Second call with same tx hash - CreateOrIgnore returns false (game already exists)
+	// Since game already exists, Upsert should NOT be called (idempotent)
+	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(false, nil).Once()
 
 	err = uc.HandleGameInitialized(context.Background(), event)
-	assert.Error(t, err) // Expected error from duplicate game creation attempt
-	assert.Contains(t, err.Error(), "failed to create game")
+	assert.NoError(t, err) // No error - idempotent processing
 
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
 }
 
 // TestHandleGameFinished_WithReferrer tests referral statistics update (T091, FR-020, FR-021)

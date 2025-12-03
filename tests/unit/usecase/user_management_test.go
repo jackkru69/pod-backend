@@ -18,8 +18,9 @@ func TestCreateOrUpdateUser_Success(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
+	telegramID := int64(123456789)
 	user := &entity.User{
-		TelegramUserID:   123456789,
+		TelegramUserID:   &telegramID,
 		TelegramUsername: "testuser",
 		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 	}
@@ -37,8 +38,9 @@ func TestCreateOrUpdateUser_RepositoryError(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
+	telegramID := int64(123456789)
 	user := &entity.User{
-		TelegramUserID:   123456789,
+		TelegramUserID:   &telegramID,
 		TelegramUsername: "testuser",
 		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 	}
@@ -59,9 +61,10 @@ func TestGetUserByWallet_Success(t *testing.T) {
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
 	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	telegramID := int64(123456789)
 	expectedUser := &entity.User{
 		ID:               1,
-		TelegramUserID:   123456789,
+		TelegramUserID:   &telegramID,
 		TelegramUsername: "testuser",
 		WalletAddress:    walletAddress,
 		TotalGamesPlayed: 10,

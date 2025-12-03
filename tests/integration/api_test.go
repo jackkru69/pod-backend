@@ -32,7 +32,7 @@ func TestGETGames(t *testing.T) {
 
 		// Seed user first (FK constraint)
 		seedUser(t, &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "player_one",
 			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			CreatedAt:        time.Now(),
@@ -132,7 +132,7 @@ func TestGETGames(t *testing.T) {
 
 		// Seed user first (FK constraint)
 		seedUser(t, &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "player_one",
 			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			CreatedAt:        time.Now(),
@@ -189,7 +189,7 @@ func TestGETGameByID(t *testing.T) {
 
 		// Seed user first (FK constraint)
 		seedUser(t, &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "player_one",
 			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			CreatedAt:        time.Now(),
@@ -463,7 +463,7 @@ func seedUser(t *testing.T, user *entity.User) {
 func seedGameWithUser(t *testing.T, game *entity.Game) {
 	// Create user for player one
 	seedUser(t, &entity.User{
-		TelegramUserID:   123456789,
+		TelegramUserID:   Int64Ptr(123456789),
 		TelegramUsername: "player_one",
 		WalletAddress:    game.PlayerOneAddress,
 		CreatedAt:        time.Now(),
@@ -491,7 +491,7 @@ func TestUserProfile(t *testing.T) {
 		defer cleanupTestDB(t)
 
 		testUser := &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "testuser",
 			WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
 			TotalGamesPlayed: 10,
@@ -550,7 +550,7 @@ func TestUserGameHistory(t *testing.T) {
 
 		// Seed user
 		testUser := &entity.User{
-			TelegramUserID:   123456789,
+			TelegramUserID:   Int64Ptr(123456789),
 			TelegramUsername: "testuser",
 			WalletAddress:    walletAddress,
 			CreatedAt:        time.Now(),
@@ -560,7 +560,7 @@ func TestUserGameHistory(t *testing.T) {
 
 		// Seed player two user for FK constraint
 		playerTwoUser := &entity.User{
-			TelegramUserID:   987654321,
+			TelegramUserID:   Int64Ptr(987654321),
 			TelegramUsername: "playertwo",
 			WalletAddress:    playerTwoAddress,
 			CreatedAt:        time.Now(),
@@ -643,7 +643,7 @@ func TestUserReferralStats(t *testing.T) {
 
 		// Seed user
 		testUser := &entity.User{
-			TelegramUserID:        123456789,
+			TelegramUserID:        Int64Ptr(123456789),
 			TelegramUsername:      "testuser",
 			WalletAddress:         walletAddress,
 			TotalReferrals:        5,
@@ -681,7 +681,7 @@ func TestUserReferralStats(t *testing.T) {
 
 		// Seed user with no referrals
 		testUser := &entity.User{
-			TelegramUserID:        987654321,
+			TelegramUserID:        Int64Ptr(987654321),
 			TelegramUsername:      "newuser",
 			WalletAddress:         walletAddress,
 			TotalReferrals:        0,
