@@ -14,6 +14,10 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/swagger"
+
+	_ "pod-backend/docs" // Swagger docs
+
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -93,6 +97,7 @@ func main() {
 	gameRepo := repopg.NewGameRepository(pg)
 	userRepo := repopg.NewUserRepository(pg)
 	eventRepo := repopg.NewGameEventRepository(pg)
+	syncStateRepo := repopg.NewBlockchainSyncStateRepository(pg)
 
 	// Initialize use cases
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
@@ -130,6 +135,25 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize blockchain event handler")
 	}
+
+	// Load last processed lt from database to resume from saved state
+	ctx := context.Background()
+	lastLt, err := syncStateRepo.GetLastProcessedLt(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to load last processed lt from database, starting from 0")
+		lastLt = "0"
+	}
+	if lastLt != "0" {
+		log.Info().Str("lt", lastLt).Msg("Resuming blockchain subscription from saved state")
+		blockchainHandler.SetLastProcessedLt(lastLt)
+	}
+
+	// Set callback to persist lt updates to database
+	blockchainHandler.SetOnLtUpdated(func(lt string) {
+		if err := syncStateRepo.UpdateLastProcessedLt(ctx, lt); err != nil {
+			log.Error().Err(err).Str("lt", lt).Msg("Failed to persist last processed lt")
+		}
+	})
 
 	// Wire metrics into blockchain subscriber (T097)
 	blockchainHandler.SetMetrics(blockchainMetrics)
@@ -172,6 +196,12 @@ func main() {
 		handler(c.Context())
 		return nil
 	})
+
+	// Swagger documentation (FR-024, FR-025)
+	if appCfg.Swagger.Enabled {
+		app.Get("/swagger/*", swagger.HandlerDefault)
+		log.Info().Msg("Swagger UI available at /swagger/index.html")
+	}
 
 	// REST API routes
 	apiV1 := app.Group("/api/v1")

@@ -151,6 +151,12 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 	// (in TON contract, the choice is hidden in the secret hash)
 	playerOneChoice, _ := extractInt64(event.EventData, "player_one_choice")
 
+	// Ensure player_one user exists (for FK constraint satisfaction)
+	// This creates a minimal "blockchain-only" user if they don't exist yet
+	if err := uc.userRepo.EnsureUserByWallet(ctx, playerOne); err != nil {
+		return fmt.Errorf("failed to ensure player one user: %w", err)
+	}
+
 	// Create game entity
 	game := &entity.Game{
 		GameID:           gameID,
@@ -163,8 +169,15 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 	}
 
 	// Persist game FIRST (FR-001) - game_events has FK to games
-	if err := uc.gameRepo.Create(ctx, game); err != nil {
+	// Use CreateOrIgnore for idempotent event processing (duplicate events are ignored)
+	created, err := uc.gameRepo.CreateOrIgnore(ctx, game)
+	if err != nil {
 		return fmt.Errorf("failed to create game: %w", err)
+	}
+
+	// If game already existed, skip event persistence (already processed)
+	if !created {
+		return nil // Game already exists - idempotent, no error
 	}
 
 	// Serialize EventData to Payload for persistence
@@ -199,6 +212,12 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 	playerTwo, err := extractString(event.EventData, "player_two")
 	if err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
+	}
+
+	// Ensure player_two user exists (for FK constraint satisfaction)
+	// This creates a minimal "blockchain-only" user if they don't exist yet
+	if err := uc.userRepo.EnsureUserByWallet(ctx, playerTwo); err != nil {
+		return fmt.Errorf("failed to ensure player two user: %w", err)
 	}
 
 	// Update game with player 2 (FR-008) - must be done before event persistence due to FK

@@ -11,7 +11,7 @@ import (
 // to participate with multiple wallets.
 type User struct {
 	ID                    int64     `json:"id"`
-	TelegramUserID        int64     `json:"telegram_user_id"`
+	TelegramUserID        *int64    `json:"telegram_user_id,omitempty"` // Nullable for blockchain-only users
 	TelegramUsername      string    `json:"telegram_username"`
 	WalletAddress         string    `json:"wallet_address"`
 	TotalGamesPlayed      int       `json:"total_games_played"`
@@ -26,6 +26,7 @@ type User struct {
 var tonAddressRegex = regexp.MustCompile(`^EQ[A-Za-z0-9_-]{46}$`)
 
 // Validate validates the User entity.
+// TelegramUserID is optional (can be nil) for blockchain-only users.
 func (u *User) Validate() error {
 	if u.WalletAddress == "" {
 		return errors.New("wallet_address is required")
@@ -35,8 +36,10 @@ func (u *User) Validate() error {
 		return errors.New("wallet_address must be valid TON address format (EQ...)")
 	}
 
-	if u.TelegramUserID <= 0 {
-		return errors.New("telegram_user_id must be positive")
+	// TelegramUserID is optional for blockchain-only users
+	// When provided, it must be positive
+	if u.TelegramUserID != nil && *u.TelegramUserID <= 0 {
+		return errors.New("telegram_user_id must be positive when provided")
 	}
 
 	if u.TotalGamesPlayed < 0 {

@@ -19,6 +19,7 @@ type EventSourceFactory struct {
 	sourceMu        sync.RWMutex
 	onFallback      func() // Called when fallback occurs
 	fallbackHandler func() // Internal fallback trigger
+	onLtUpdated     func(lt string) // Callback when lt is updated
 }
 
 // FactoryConfig holds configuration for EventSourceFactory.
@@ -103,7 +104,7 @@ func (f *EventSourceFactory) CreateEventSource(handler EventHandler) (EventSourc
 }
 
 // createHTTPPoller creates an HTTP polling event source.
-func (f *EventSourceFactory) createHTTPPoller(handler EventHandler) EventSource {
+func (f *EventSourceFactory) createHTTPPoller(handler EventHandler) *Poller {
 	poller := NewPoller(f.httpClient, handler, f.logger, 0)
 	f.currentSource = poller
 	return poller
@@ -124,6 +125,11 @@ func (f *EventSourceFactory) fallbackToHTTP(handler EventHandler) {
 		f.logger.Info("Falling back to HTTP polling from lt: %s", lastLt)
 		poller := f.createHTTPPoller(handler)
 		poller.SetLastProcessedLt(lastLt)
+
+		// Set lt update callback if configured
+		if f.onLtUpdated != nil {
+			poller.SetOnLtUpdated(f.onLtUpdated)
+		}
 
 		// Start the poller
 		ctx := context.Background()
@@ -217,6 +223,7 @@ func (f *EventSourceFactory) SwitchToWebSocket(ctx context.Context, handler Even
 	return nil
 }
 
+
 // SwitchToHTTP switches from current source to HTTP polling (T151).
 func (f *EventSourceFactory) SwitchToHTTP(ctx context.Context, handler EventHandler) {
 	f.sourceMu.Lock()
@@ -235,6 +242,25 @@ func (f *EventSourceFactory) SwitchToHTTP(ctx context.Context, handler EventHand
 	poller := f.createHTTPPoller(handler)
 	poller.SetLastProcessedLt(lastLt)
 
+	// Set lt update callback if configured
+	if f.onLtUpdated != nil {
+		poller.SetOnLtUpdated(f.onLtUpdated)
+	}
+
 	// Start the poller
 	poller.Start(ctx)
+}
+
+// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+// Used to persist the state to database after processing transactions.
+func (f *EventSourceFactory) SetOnLtUpdated(callback func(lt string)) {
+	f.sourceMu.Lock()
+	defer f.sourceMu.Unlock()
+
+	f.onLtUpdated = callback
+
+	// If current source is a poller, set callback on it
+	if poller, ok := f.currentSource.(*Poller); ok {
+		poller.SetOnLtUpdated(callback)
+	}
 }

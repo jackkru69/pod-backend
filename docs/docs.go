@@ -556,6 +556,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "telegram_user_id": {
+                    "description": "Nullable for blockchain-only users",
                     "type": "integer"
                 },
                 "telegram_username": {
@@ -739,8 +740,8 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0.0",
-	Host:             "localhost:3000",
-	BasePath:         "/api/v1",
+	Host:             "localhost:8090",
+	BasePath:         "/",
 	Schemes:          []string{"http", "https"},
 	Title:            "POD Game Backend API",
 	Description:      "Backend service for TON blockchain gambling game with real-time WebSocket updates",

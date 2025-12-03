@@ -347,4 +347,3 @@ func TestMessageParserV2_RoundTrip(t *testing.T) {
 		assert.Equal(t, "1500000000", msg.Actual.String())
 	})
 }
-

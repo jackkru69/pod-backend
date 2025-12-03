@@ -34,6 +34,14 @@ const (
 
 	// InsufficientBalanceNotify opcode = 4148213171 = 0xF76E49B3
 	OpcodeInsufficientBalanceNotifyV2 uint32 = 4148213171
+
+	// Factory Event opcodes (emitted via emit() - appear in out_msgs)
+	// From PODGameFactory_PODGameFactory.abi
+	OpcodeGameInitializedEvent uint32 = 2904670482
+	OpcodeGameStartedEvent     uint32 = 3493528925
+	OpcodeGameFinishedEvent    uint32 = 2774366883
+	OpcodeGameCancelledEvent   uint32 = 616834666
+	OpcodeDrawEvent            uint32 = 2466780489
 )
 
 // MessageParserV2 parses TON blockchain messages using tonutils-go Cell parser.

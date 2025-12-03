@@ -13,6 +13,11 @@ type GameRepository interface {
 	// Returns error if game_id already exists.
 	Create(ctx context.Context, game *entity.Game) error
 
+	// CreateOrIgnore creates a new game record or ignores if already exists.
+	// Returns true if a new game was created, false if it already existed.
+	// Used for idempotent processing of blockchain events.
+	CreateOrIgnore(ctx context.Context, game *entity.Game) (created bool, err error)
+
 	// GetByID retrieves a game by its ID.
 	// Returns nil if not found.
 	GetByID(ctx context.Context, gameID int64) (*entity.Game, error)

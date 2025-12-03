@@ -30,8 +30,8 @@ import (
 // @title       POD Game Backend API
 // @description Backend service for TON blockchain gambling game with real-time WebSocket updates
 // @version     1.0.0
-// @host        localhost:3000
-// @BasePath    /api/v1
+// @host        localhost:8090
+// @BasePath    /
 // @schemes     http https
 //
 // @contact.name   POD Game Team

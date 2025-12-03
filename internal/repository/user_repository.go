@@ -17,6 +17,11 @@ type UserRepository interface {
 	// Used for automatic user profile creation from Telegram auth (FR-003).
 	CreateOrUpdate(ctx context.Context, user *entity.User) error
 
+	// EnsureUserByWallet ensures a user exists for the given wallet address.
+	// If user doesn't exist, creates a minimal "blockchain-only" user with just the wallet.
+	// If user exists, does nothing. Used for FK constraint satisfaction in game creation.
+	EnsureUserByWallet(ctx context.Context, walletAddress string) error
+
 	// GetByWalletAddress retrieves a user by their wallet address.
 	// Returns nil if not found.
 	GetByWalletAddress(ctx context.Context, walletAddress string) (*entity.User, error)

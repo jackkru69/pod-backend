@@ -15,11 +15,12 @@ import (
 // Implements T094: Start blockchain subscription on service boot.
 // T154: Updated to use EventSourceFactory for WebSocket/HTTP flexibility.
 type TONEventHandler struct {
-	subscriberUC *usecase.BlockchainSubscriberUseCase
-	factory      *toncenter.EventSourceFactory
-	logger       logger.Interface
-	ctx          context.Context
-	cancel       context.CancelFunc
+	subscriberUC  *usecase.BlockchainSubscriberUseCase
+	factory       *toncenter.EventSourceFactory
+	logger        logger.Interface
+	ctx           context.Context
+	cancel        context.CancelFunc
+	onLtUpdated   func(lt string) // Callback to persist lt to database
 }
 
 // NewTONEventHandler creates a new blockchain event handler.
@@ -165,4 +166,18 @@ func (h *TONEventHandler) IsConnected() bool {
 func (h *TONEventHandler) SetMetrics(m *metrics.BlockchainMetrics) {
 	h.subscriberUC.SetMetrics(m)
 	h.logger.Info("Blockchain metrics enabled")
+}
+
+// SetLastProcessedLt sets the starting logical time for blockchain polling.
+// Should be called before Start() to resume from database state.
+func (h *TONEventHandler) SetLastProcessedLt(lt string) {
+	h.subscriberUC.SetLastProcessedLt(lt)
+}
+
+// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+// Used to persist the state to database after processing transactions.
+func (h *TONEventHandler) SetOnLtUpdated(callback func(lt string)) {
+	h.onLtUpdated = callback
+	// Also set callback on the factory/event source
+	h.factory.SetOnLtUpdated(callback)
 }

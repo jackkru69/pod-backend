@@ -310,9 +310,9 @@ func TestWebSocketLoad_Reconnection(t *testing.T) {
 	}
 
 	const (
-		connections     = 20
-		cycles          = 3
-		reconnGameID    = 999997
+		connections  = 20
+		cycles       = 3
+		reconnGameID = 999997
 	)
 
 	// Setup test game

@@ -121,6 +121,42 @@ func (r *UserRepository) CreateOrUpdate(ctx context.Context, user *entity.User) 
 	return nil
 }
 
+// EnsureUserByWallet ensures a user exists for the given wallet address.
+// If user doesn't exist, creates a minimal "blockchain-only" user with just the wallet.
+// If user exists, does nothing. Used for FK constraint satisfaction in game creation.
+func (r *UserRepository) EnsureUserByWallet(ctx context.Context, walletAddress string) error {
+	sql, args, err := r.pg.Builder.
+		Insert("users").
+		Columns(
+			"wallet_address",
+			"total_games_played",
+			"total_wins",
+			"total_losses",
+			"total_referrals",
+			"total_referral_earnings",
+		).
+		Values(
+			walletAddress,
+			0,
+			0,
+			0,
+			0,
+			0,
+		).
+		Suffix("ON CONFLICT (wallet_address) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+
+	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	if err != nil {
+		return fmt.Errorf("execute query: %w", err)
+	}
+
+	return nil
+}
+
 // GetByWalletAddress retrieves a user by their wallet address.
 func (r *UserRepository) GetByWalletAddress(ctx context.Context, walletAddress string) (*entity.User, error) {
 	sql, args, err := r.pg.Builder.

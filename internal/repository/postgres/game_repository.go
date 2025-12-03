@@ -97,6 +97,83 @@ func (r *GameRepository) Create(ctx context.Context, game *entity.Game) error {
 	return nil
 }
 
+// CreateOrIgnore creates a new game record or ignores if already exists.
+// Returns true if a new game was created, false if it already existed.
+// Used for idempotent processing of blockchain events.
+func (r *GameRepository) CreateOrIgnore(ctx context.Context, game *entity.Game) (bool, error) {
+	if err := game.Validate(); err != nil {
+		return false, fmt.Errorf("validation failed: %w", err)
+	}
+
+	sql, args, err := r.pg.Builder.
+		Insert("games").
+		Columns(
+			"game_id",
+			"status",
+			"player_one_address",
+			"player_two_address",
+			"player_one_choice",
+			"player_two_choice",
+			"player_one_referrer",
+			"player_two_referrer",
+			"bet_amount",
+			"winner_address",
+			"payout_amount",
+			"service_fee_numerator",
+			"referrer_fee_numerator",
+			"waiting_timeout_seconds",
+			"lowest_bid_allowed",
+			"highest_bid_allowed",
+			"fee_receiver_address",
+			"joined_at",
+			"revealed_at",
+			"completed_at",
+			"init_tx_hash",
+			"join_tx_hash",
+			"reveal_tx_hash",
+			"complete_tx_hash",
+		).
+		Values(
+			game.GameID,
+			game.Status,
+			game.PlayerOneAddress,
+			game.PlayerTwoAddress,
+			game.PlayerOneChoice,
+			game.PlayerTwoChoice,
+			game.PlayerOneReferrer,
+			game.PlayerTwoReferrer,
+			game.BetAmount,
+			game.WinnerAddress,
+			game.PayoutAmount,
+			game.ServiceFeeNumerator,
+			game.ReferrerFeeNumerator,
+			game.WaitingTimeoutSeconds,
+			game.LowestBidAllowed,
+			game.HighestBidAllowed,
+			game.FeeReceiverAddress,
+			game.JoinedAt,
+			game.RevealedAt,
+			game.CompletedAt,
+			game.InitTxHash,
+			game.JoinTxHash,
+			game.RevealTxHash,
+			game.CompleteTxHash,
+		).
+		Suffix("ON CONFLICT (game_id) DO NOTHING").
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build query: %w", err)
+	}
+
+	result, err := r.pg.Pool.Exec(ctx, sql, args...)
+	if err != nil {
+		return false, fmt.Errorf("execute query: %w", err)
+	}
+
+	// RowsAffected() returns 1 if inserted, 0 if conflict (already exists)
+	return result.RowsAffected() > 0, nil
+}
+
 // GetByID retrieves a game by its ID.
 func (r *GameRepository) GetByID(ctx context.Context, gameID int64) (*entity.Game, error) {
 	sql, args, err := r.pg.Builder.

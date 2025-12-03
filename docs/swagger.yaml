@@ -1,4 +1,4 @@
-basePath: /api/v1
+basePath: /
 definitions:
   entity.Game:
     properties:
@@ -99,6 +99,7 @@ definitions:
       id:
         type: integer
       telegram_user_id:
+        description: Nullable for blockchain-only users
         type: integer
       telegram_username:
         type: string
@@ -215,7 +216,7 @@ definitions:
       message:
         type: string
     type: object
-host: localhost:3000
+host: localhost:8090
 info:
   contact:
     name: POD Game Team

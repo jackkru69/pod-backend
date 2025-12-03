@@ -15,8 +15,8 @@
         },
         "version": "1.0.0"
     },
-    "host": "localhost:3000",
-    "basePath": "/api/v1",
+    "host": "localhost:8090",
+    "basePath": "/",
     "paths": {
         "/api/v1/games": {
             "get": {
@@ -554,6 +554,7 @@
                     "type": "integer"
                 },
                 "telegram_user_id": {
+                    "description": "Nullable for blockchain-only users",
                     "type": "integer"
                 },
                 "telegram_username": {

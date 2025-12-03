@@ -42,6 +42,7 @@ type Poller struct {
 	backoffDuration   time.Duration // Current exponential backoff duration (T103)
 	consecutiveErrors int           // Count for exponential backoff
 	isRunning         atomic.Bool   // Track if poller is running (T149)
+	onLtUpdated       func(lt string) // Callback when last processed lt is updated
 }
 
 // NewPoller creates a new adaptive blockchain poller.
@@ -55,6 +56,12 @@ func NewPoller(client *Client, handler EventHandler, logger logger.Interface, st
 		lastProcessedLt: "0",             // Start from beginning
 		stopCh:          make(chan struct{}),
 	}
+}
+
+// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+// Used to persist the state to database.
+func (p *Poller) SetOnLtUpdated(callback func(lt string)) {
+	p.onLtUpdated = callback
 }
 
 // Start begins the adaptive polling loop.
@@ -107,16 +114,25 @@ func (p *Poller) poll(ctx context.Context) {
 	p.consecutiveErrors = 0
 	p.backoffDuration = BackoffInitial
 
-	if len(txs) == 0 {
-		p.logger.Debug("No new transactions")
+	// Filter out already processed transactions (lt <= lastProcessedLt)
+	var newTxs []Transaction
+	for _, tx := range txs {
+		if tx.Lt() > p.lastProcessedLt {
+			newTxs = append(newTxs, tx)
+		}
+	}
+
+	if len(newTxs) == 0 {
+		p.logger.Debug("No new transactions (filtered %d already processed)", len(txs))
 		p.adjustInterval(false) // Slow down when idle
 		return
 	}
 
-	p.logger.Info("Found %d new transactions", len(txs))
+	p.logger.Info("Found %d new transactions (filtered %d already processed)", len(newTxs), len(txs)-len(newTxs))
 
 	// Process transactions
-	for _, tx := range txs {
+	var maxLt string
+	for _, tx := range newTxs {
 		if err := p.handler.HandleTransaction(ctx, tx); err != nil {
 			p.logger.Error("Failed to handle transaction hash=%s: %v", tx.Hash(), err)
 			continue
@@ -126,7 +142,13 @@ func (p *Poller) poll(ctx context.Context) {
 		// TON uses lt (logical time) for transaction ordering, higher lt means newer
 		if tx.Lt() > p.lastProcessedLt {
 			p.lastProcessedLt = tx.Lt()
+			maxLt = tx.Lt()
 		}
+	}
+
+	// Persist updated lt to database via callback
+	if maxLt != "" && p.onLtUpdated != nil {
+		p.onLtUpdated(maxLt)
 	}
 
 	// Speed up when activity detected
