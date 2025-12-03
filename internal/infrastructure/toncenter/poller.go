@@ -39,9 +39,9 @@ type Poller struct {
 	lastProcessedLt   string // Last processed logical time (lt)
 	ticker            *time.Ticker
 	stopCh            chan struct{}
-	backoffDuration   time.Duration // Current exponential backoff duration (T103)
-	consecutiveErrors int           // Count for exponential backoff
-	isRunning         atomic.Bool   // Track if poller is running (T149)
+	backoffDuration   time.Duration   // Current exponential backoff duration (T103)
+	consecutiveErrors int             // Count for exponential backoff
+	isRunning         atomic.Bool     // Track if poller is running (T149)
 	onLtUpdated       func(lt string) // Callback when last processed lt is updated
 }
 

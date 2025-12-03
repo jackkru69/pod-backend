@@ -15,12 +15,12 @@ import (
 // Implements T094: Start blockchain subscription on service boot.
 // T154: Updated to use EventSourceFactory for WebSocket/HTTP flexibility.
 type TONEventHandler struct {
-	subscriberUC  *usecase.BlockchainSubscriberUseCase
-	factory       *toncenter.EventSourceFactory
-	logger        logger.Interface
-	ctx           context.Context
-	cancel        context.CancelFunc
-	onLtUpdated   func(lt string) // Callback to persist lt to database
+	subscriberUC *usecase.BlockchainSubscriberUseCase
+	factory      *toncenter.EventSourceFactory
+	logger       logger.Interface
+	ctx          context.Context
+	cancel       context.CancelFunc
+	onLtUpdated  func(lt string) // Callback to persist lt to database
 }
 
 // NewTONEventHandler creates a new blockchain event handler.

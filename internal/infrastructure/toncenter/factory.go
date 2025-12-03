@@ -17,8 +17,8 @@ type EventSourceFactory struct {
 	httpClient      *Client
 	currentSource   EventSource
 	sourceMu        sync.RWMutex
-	onFallback      func() // Called when fallback occurs
-	fallbackHandler func() // Internal fallback trigger
+	onFallback      func()          // Called when fallback occurs
+	fallbackHandler func()          // Internal fallback trigger
 	onLtUpdated     func(lt string) // Callback when lt is updated
 }
 
@@ -222,7 +222,6 @@ func (f *EventSourceFactory) SwitchToWebSocket(ctx context.Context, handler Even
 
 	return nil
 }
-
 
 // SwitchToHTTP switches from current source to HTTP polling (T151).
 func (f *EventSourceFactory) SwitchToHTTP(ctx context.Context, handler EventHandler) {
