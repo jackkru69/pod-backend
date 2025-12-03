@@ -34,10 +34,7 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 		},
 	}
 
-	// Expect event to be persisted
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
-
-	// Expect game to be created with status WAITING_FOR_OPPONENT (1)
+	// Expect game to be created with status WAITING_FOR_OPPONENT (1) - called FIRST
 	mockGameRepo.On("Create", mock.Anything, mock.MatchedBy(func(g *entity.Game) bool {
 		return g.GameID == 123 &&
 			g.Status == entity.GameStatusWaitingForOpponent &&
@@ -45,6 +42,9 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 			g.BetAmount == 1000000000 &&
 			g.PlayerOneChoice == 1
 	})).Return(nil)
+
+	// Expect event to be persisted - called SECOND
+	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 
@@ -96,15 +96,16 @@ func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 		},
 	}
 
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	// Note: HandleGameInitialized creates game FIRST, then upserts event
+	// So if Create fails, Upsert should not be called
 	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("database error"))
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "database error")
-	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
+	// eventRepo.Upsert should NOT be called since Create failed first
 }
 
 // TestHandleGameStarted_Success tests successful game update when player 2 joins
@@ -258,15 +259,16 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 	}
 
 	// First call - should process normally
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil).Once()
+	// Order: Create game first, then Upsert event
 	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(nil).Once()
+	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil).Once()
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 	assert.NoError(t, err)
 
-	// Second call with same tx hash - Upsert is idempotent, but game Create will fail at DB level
+	// Second call with same tx hash - game Create will fail at DB level first
 	// The DB constraint (unique game_id) will prevent duplicate game creation
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil).Once()
+	// Since Create fails first, Upsert will NOT be called
 	mockGameRepo.On("Create", mock.Anything, mock.Anything).Return(errors.New("duplicate key value violates unique constraint")).Once()
 
 	err = uc.HandleGameInitialized(context.Background(), event)

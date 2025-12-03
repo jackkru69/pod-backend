@@ -67,7 +67,7 @@ func (h *GameWebSocketHandler) UpgradeCheck(c *fiber.Ctx) error {
 	// Store game ID in locals for handler
 	c.Locals("gameID", game.GameID)
 
-	return nil
+	return c.Next()
 }
 
 // HandleConnection handles WebSocket connection lifecycle

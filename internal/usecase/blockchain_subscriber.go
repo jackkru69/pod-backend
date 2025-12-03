@@ -125,7 +125,7 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 }
 
 // parseTransaction converts a blockchain transaction into a GameEvent entity.
-// Uses MessageParser to decode BOC-encoded TON messages and extract event data.
+// Uses MessageParserV2 to decode BOC-encoded TON messages using tonutils-go Cell parser.
 // T096: Logs WARN for validation failures.
 func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction) (*entity.GameEvent, error) {
 	// Check if in_msg exists and is not null
@@ -134,8 +134,8 @@ func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction
 		return nil, fmt.Errorf("transaction has no in_msg data (not a game event)")
 	}
 
-	// Use MessageParser to decode the TON message
-	parser := toncenter.NewMessageParser()
+	// Use MessageParserV2 to decode the TON message using Cell parser
+	parser := toncenter.NewMessageParserV2()
 	parsedMsg, err := parser.ParseInMsg(tx.InMsg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TON message: %w", err)

@@ -182,3 +182,169 @@ func TestGetEventTypeForOpcode(t *testing.T) {
 		})
 	}
 }
+
+// TestMessageParserV2_RoundTrip tests the complete build -> parse cycle using proper TON Cell format.
+// This ensures that messages built with TestMessageBuilder can be correctly parsed by MessageParserV2.
+func TestMessageParserV2_RoundTrip(t *testing.T) {
+	builder := NewTestMessageBuilder()
+	parser := NewMessageParserV2()
+
+	// Test addresses in user-friendly format (EQ prefix for mainnet)
+	testAddr1 := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	testAddr2 := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+
+	t.Run("GameInitializedNotify round-trip", func(t *testing.T) {
+		// Build message
+		gameID := int64(12345)
+		bidValue := int64(1000000000) // 1 TON
+		messageBase64 := builder.BuildGameInitializedNotify(gameID, testAddr1, bidValue)
+
+		// Create in_msg JSON like from TON Center API
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "1000000000",
+			"message": "` + messageBase64 + `",
+			"msg_data": {"@type": "msg.dataRaw", "body": "` + messageBase64 + `"}
+		}`)
+
+		// Parse message
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err, "ParseInMsg should not return error")
+		assert.Equal(t, EventTypeGameInitialized, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		// Address format from parser uses EQ prefix
+		assert.Contains(t, msg.PlayerOne, "EQ")
+		assert.NotNil(t, msg.BidValue)
+		assert.Equal(t, "1000000000", msg.BidValue.String())
+	})
+
+	t.Run("GameStartedNotify round-trip", func(t *testing.T) {
+		gameID := int64(67890)
+		totalGainings := int64(2000000000) // 2 TON
+		messageBase64 := builder.BuildGameStartedNotify(gameID, testAddr1, testAddr2, totalGainings)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "2000000000",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeGameStarted, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		assert.Contains(t, msg.PlayerOne, "EQ")
+		assert.Contains(t, msg.PlayerTwo, "EQ")
+		assert.NotNil(t, msg.TotalGainings)
+		assert.Equal(t, "2000000000", msg.TotalGainings.String())
+	})
+
+	t.Run("GameFinishedNotify round-trip", func(t *testing.T) {
+		gameID := int64(99999)
+		totalGainings := int64(1900000000)
+		messageBase64 := builder.BuildGameFinishedNotify(gameID, testAddr1, testAddr2, totalGainings)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "1900000000",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeGameFinished, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		assert.Contains(t, msg.Winner, "EQ")
+		assert.Contains(t, msg.Looser, "EQ")
+		assert.NotNil(t, msg.TotalGainings)
+	})
+
+	t.Run("GameCancelledNotify round-trip", func(t *testing.T) {
+		gameID := int64(55555)
+		messageBase64 := builder.BuildGameCancelledNotify(gameID, testAddr1)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "100000",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeGameCancelled, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		assert.Contains(t, msg.PlayerOne, "EQ")
+	})
+
+	t.Run("DrawNotify round-trip", func(t *testing.T) {
+		gameID := int64(77777)
+		messageBase64 := builder.BuildDrawNotify(gameID)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "0",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeDraw, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+	})
+
+	t.Run("SecretOpenedNotify round-trip", func(t *testing.T) {
+		gameID := int64(33333)
+		coinSide := uint8(1) // Heads
+		messageBase64 := builder.BuildSecretOpenedNotify(gameID, testAddr1, coinSide)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "0",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeSecretOpened, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		assert.Contains(t, msg.Player, "EQ")
+		assert.Equal(t, coinSide, msg.CoinSide)
+	})
+
+	t.Run("InsufficientBalanceNotify round-trip", func(t *testing.T) {
+		gameID := int64(44444)
+		required := int64(2000000000)
+		actual := int64(1500000000)
+		messageBase64 := builder.BuildInsufficientBalanceNotify(gameID, required, actual)
+
+		inMsgJSON := json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + testAddr1 + `",
+			"destination": "` + testAddr2 + `",
+			"value": "0",
+			"message": "` + messageBase64 + `"
+		}`)
+
+		msg, err := parser.ParseInMsg(inMsgJSON)
+		require.NoError(t, err)
+		assert.Equal(t, EventTypeInsufficientBalance, msg.EventType)
+		assert.Equal(t, gameID, msg.GameID)
+		assert.NotNil(t, msg.Required)
+		assert.NotNil(t, msg.Actual)
+		assert.Equal(t, "2000000000", msg.Required.String())
+		assert.Equal(t, "1500000000", msg.Actual.String())
+	})
+}
+

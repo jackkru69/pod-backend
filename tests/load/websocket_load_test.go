@@ -2,12 +2,16 @@ package load_test
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -18,8 +22,69 @@ const (
 	// Test configuration
 	targetConnections = 100
 	testDuration      = 30 * time.Second
-	wsURL             = "ws://localhost:3000/ws/games/1"
+	wsURL             = "ws://localhost:8090/ws/games/1"
+	testGameID        = 999999 // Use high ID to avoid conflicts
 )
+
+// getTestDB returns a database connection for test setup/cleanup
+func getTestDB(t *testing.T) *sql.DB {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://user:myAwEsOm3pa55@w0rd@localhost:5433/db?sslmode=disable"
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("Failed to connect to database: %v", err)
+	}
+	return db
+}
+
+// setupTestGame creates a test game for WebSocket connections
+func setupTestGame(t *testing.T, db *sql.DB, gameID int64) {
+	// First ensure test user exists
+	userQuery := `
+		INSERT INTO users (telegram_user_id, telegram_username, wallet_address, created_at, updated_at)
+		VALUES (12345678, 'test_user', 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2', NOW(), NOW())
+		ON CONFLICT (wallet_address) DO NOTHING
+	`
+	_, _ = db.Exec(userQuery) // Ignore error if user exists
+
+	txHash := fmt.Sprintf("test_tx_%d", gameID)
+	query := `
+		INSERT INTO games (
+			game_id, status, player_one_address, bet_amount, player_one_choice,
+			service_fee_numerator, referrer_fee_numerator, waiting_timeout_seconds,
+			lowest_bid_allowed, highest_bid_allowed, fee_receiver_address, init_tx_hash, created_at
+		)
+		VALUES ($1, 1, 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2', 1000000000, 1,
+			500, 50, 3600, 100000000, 10000000000, 'EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2', 
+			$2, NOW())
+		ON CONFLICT (game_id) DO UPDATE SET status = 1
+	`
+	_, err := db.Exec(query, gameID, txHash)
+	if err != nil {
+		t.Fatalf("Failed to create test game: %v", err)
+	}
+	t.Logf("Created test game with ID %d", gameID)
+}
+
+// cleanupTestGame removes the test game
+func cleanupTestGame(t *testing.T, db *sql.DB, gameID int64) {
+	// First delete related events
+	_, _ = db.Exec("DELETE FROM game_events WHERE game_id = $1", gameID)
+	// Then delete the game
+	_, err := db.Exec("DELETE FROM games WHERE game_id = $1", gameID)
+	if err != nil {
+		t.Logf("Warning: Failed to cleanup test game: %v", err)
+	} else {
+		t.Logf("Cleaned up test game with ID %d", gameID)
+	}
+}
+
+// getWSURL returns WebSocket URL for a specific game ID
+func getWSURL(gameID int64) string {
+	return fmt.Sprintf("ws://localhost:8090/ws/games/%d", gameID)
+}
 
 // TestWebSocketLoad_100Connections tests 100 concurrent WebSocket connections
 func TestWebSocketLoad_100Connections(t *testing.T) {
@@ -27,7 +92,14 @@ func TestWebSocketLoad_100Connections(t *testing.T) {
 		t.Skip("Skipping load test in short mode")
 	}
 
-	t.Logf("Starting WebSocket load test: %d connections for %v", targetConnections, testDuration)
+	// Setup test game
+	db := getTestDB(t)
+	defer db.Close()
+	setupTestGame(t, db, testGameID)
+	defer cleanupTestGame(t, db, testGameID)
+
+	wsURLForTest := getWSURL(testGameID)
+	t.Logf("Starting WebSocket load test: %d connections for %v to %s", targetConnections, testDuration, wsURLForTest)
 
 	var (
 		successfulConnections int64
@@ -56,7 +128,7 @@ func TestWebSocketLoad_100Connections(t *testing.T) {
 			startTime := time.Now()
 
 			// Connect to WebSocket
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			conn, _, err := websocket.DefaultDialer.Dial(wsURLForTest, nil)
 			if err != nil {
 				atomic.AddInt64(&failedConnections, 1)
 				t.Logf("Connection %d failed: %v", connID, err)
@@ -155,9 +227,17 @@ func TestWebSocketLoad_MessageBroadcast(t *testing.T) {
 		connections       = 50
 		broadcastInterval = 1 * time.Second
 		testDuration      = 10 * time.Second
+		broadcastGameID   = 999998
 	)
 
-	t.Logf("Testing WebSocket broadcast to %d connections", connections)
+	// Setup test game
+	db := getTestDB(t)
+	defer db.Close()
+	setupTestGame(t, db, broadcastGameID)
+	defer cleanupTestGame(t, db, broadcastGameID)
+
+	wsURLForTest := getWSURL(broadcastGameID)
+	t.Logf("Testing WebSocket broadcast to %d connections at %s", connections, wsURLForTest)
 
 	var (
 		connectedClients int64
@@ -174,7 +254,7 @@ func TestWebSocketLoad_MessageBroadcast(t *testing.T) {
 		go func(clientID int) {
 			defer wg.Done()
 
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			conn, _, err := websocket.DefaultDialer.Dial(wsURLForTest, nil)
 			if err != nil {
 				t.Logf("Client %d failed to connect: %v", clientID, err)
 				return
@@ -230,11 +310,19 @@ func TestWebSocketLoad_Reconnection(t *testing.T) {
 	}
 
 	const (
-		connections = 20
-		cycles      = 3
+		connections     = 20
+		cycles          = 3
+		reconnGameID    = 999997
 	)
 
-	t.Logf("Testing WebSocket reconnection stability: %d connections x %d cycles", connections, cycles)
+	// Setup test game
+	db := getTestDB(t)
+	defer db.Close()
+	setupTestGame(t, db, reconnGameID)
+	defer cleanupTestGame(t, db, reconnGameID)
+
+	wsURLForTest := getWSURL(reconnGameID)
+	t.Logf("Testing WebSocket reconnection stability: %d connections x %d cycles to %s", connections, cycles, wsURLForTest)
 
 	var successfulReconnections int64
 
@@ -249,7 +337,7 @@ func TestWebSocketLoad_Reconnection(t *testing.T) {
 				defer wg.Done()
 
 				// Connect
-				conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+				conn, _, err := websocket.DefaultDialer.Dial(wsURLForTest, nil)
 				if err != nil {
 					return
 				}

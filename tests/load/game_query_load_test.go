@@ -18,7 +18,7 @@ import (
 // Verify SC-005: Game list query <500ms for 1000 games
 
 const (
-	baseURL          = "http://localhost:3000"
+	baseURL          = "http://localhost:8090"
 	gameListEndpoint = "/api/v1/games"
 	targetLatency    = 500 * time.Millisecond
 	concurrentUsers  = 50
