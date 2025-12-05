@@ -13,15 +13,17 @@ import (
 
 // GameHandler handles HTTP requests for game endpoints
 type GameHandler struct {
-	gameQueryUC *usecase.GameQueryUseCase
-	logger      *zerolog.Logger
+	gameQueryUC   *usecase.GameQueryUseCase
+	reservationUC *usecase.ReservationUseCase
+	logger        *zerolog.Logger
 }
 
 // NewGameHandler creates a new GameHandler
-func NewGameHandler(gameQueryUC *usecase.GameQueryUseCase, logger *zerolog.Logger) *GameHandler {
+func NewGameHandler(gameQueryUC *usecase.GameQueryUseCase, reservationUC *usecase.ReservationUseCase, logger *zerolog.Logger) *GameHandler {
 	return &GameHandler{
-		gameQueryUC: gameQueryUC,
-		logger:      logger,
+		gameQueryUC:   gameQueryUC,
+		reservationUC: reservationUC,
+		logger:        logger,
 	}
 }
 
@@ -61,6 +63,27 @@ func (h *GameHandler) ListGames(c *fiber.Ctx) error {
 		})
 	}
 
+	// Build response with reservation status for each game
+	gamesWithReservation := make([]GameWithReservation, len(games))
+	for i, game := range games {
+		gwr := GameWithReservation{Game: game}
+
+		// Check if game has an active reservation
+		if h.reservationUC != nil {
+			if reservation, err := h.reservationUC.GetReservation(c.Context(), game.GameID); err == nil && reservation != nil {
+				gwr.Reservation = &ReservationResponse{
+					GameID:        reservation.GameID,
+					WalletAddress: reservation.WalletAddress,
+					CreatedAt:     reservation.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+					ExpiresAt:     reservation.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+					Status:        reservation.Status,
+				}
+			}
+		}
+
+		gamesWithReservation[i] = gwr
+	}
+
 	// Count total (for now, return length of results - in production this would be a separate count query)
 	total := len(games)
 
@@ -71,7 +94,7 @@ func (h *GameHandler) ListGames(c *fiber.Ctx) error {
 		Msg("ListGames successful")
 
 	return c.JSON(GameListResponse{
-		Games:  games,
+		Games:  gamesWithReservation,
 		Total:  total,
 		Limit:  limit,
 		Offset: offset,
@@ -144,10 +167,16 @@ func (h *GameHandler) GetGameByID(c *fiber.Ctx) error {
 
 // GameListResponse represents the response for list games endpoint
 type GameListResponse struct {
-	Games  []*entity.Game `json:"games"`
-	Total  int            `json:"total"`
-	Limit  int            `json:"limit"`
-	Offset int            `json:"offset"`
+	Games  []GameWithReservation `json:"games"`
+	Total  int                   `json:"total"`
+	Limit  int                   `json:"limit"`
+	Offset int                   `json:"offset"`
+}
+
+// GameWithReservation represents a game with its reservation status
+type GameWithReservation struct {
+	Game        *entity.Game         `json:"game"`
+	Reservation *ReservationResponse `json:"reservation,omitempty"`
 }
 
 // ErrorResponse represents an error response

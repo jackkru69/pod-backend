@@ -104,6 +104,15 @@ func main() {
 	gameBroadcastUC := usecase.NewGameBroadcastUseCase()
 	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
 
+	// Initialize reservation use case
+	reservationCfg := usecase.ReservationConfig{
+		MaxPerWallet:           appCfg.Reservation.MaxPerWallet,
+		TimeoutSeconds:         appCfg.Reservation.TimeoutSeconds,
+		CleanupIntervalSeconds: appCfg.Reservation.CleanupIntervalSeconds,
+	}
+	reservationUC := usecase.NewReservationUseCase(gameRepo, gameBroadcastUC, reservationCfg)
+	reservationUC.StartCleanupLoop(context.Background())
+
 	// Initialize TON Center client for blockchain monitoring and health checks
 	circuitBreakerTimeout, err := time.ParseDuration(appCfg.GameBackend.CircuitBreakerTimeout)
 	if err != nil {
@@ -207,9 +216,16 @@ func main() {
 	apiV1 := app.Group("/api/v1")
 
 	// Game endpoints
-	gameHandler := rest.NewGameHandler(gameQueryUC, &log.Logger)
+	gameHandler := rest.NewGameHandler(gameQueryUC, reservationUC, &log.Logger)
 	apiV1.Get("/games", gameHandler.ListGames)
 	apiV1.Get("/games/:gameId", gameHandler.GetGameByID)
+
+	// Reservation endpoints
+	reservationHandler := rest.NewReservationHandler(reservationUC, &log.Logger)
+	apiV1.Post("/games/:gameId/reserve", reservationHandler.ReserveGame)
+	apiV1.Get("/games/:gameId/reservation", reservationHandler.GetReservation)
+	apiV1.Delete("/games/:gameId/reserve", reservationHandler.CancelReservation)
+	apiV1.Get("/reservations", reservationHandler.ListReservationsByWallet)
 
 	// User endpoints (T074)
 	userHandler := rest.NewUserHandler(userManagementUC, gameQueryUC, log.Logger)

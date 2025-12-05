@@ -70,28 +70,6 @@ definitions:
       wallet_address:
         type: string
     type: object
-  entity.Translation:
-    properties:
-      destination:
-        example: en
-        type: string
-      original:
-        example: текст для перевода
-        type: string
-      source:
-        example: auto
-        type: string
-      translation:
-        example: text for translation
-        type: string
-    type: object
-  entity.TranslationHistory:
-    properties:
-      history:
-        items:
-          $ref: '#/definitions/entity.Translation'
-        type: array
-    type: object
   entity.User:
     properties:
       created_at:
@@ -118,22 +96,6 @@ definitions:
         type: string
       wallet_address:
         type: string
-    type: object
-  request.Translate:
-    properties:
-      destination:
-        example: en
-        type: string
-      original:
-        example: текст для перевода
-        type: string
-      source:
-        example: auto
-        type: string
-    required:
-    - destination
-    - original
-    - source
     type: object
   rest.ErrorResponse:
     properties:
@@ -164,7 +126,7 @@ definitions:
     properties:
       games:
         items:
-          $ref: '#/definitions/entity.Game'
+          $ref: '#/definitions/rest.GameWithReservation'
         type: array
       limit:
         type: integer
@@ -172,6 +134,13 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  rest.GameWithReservation:
+    properties:
+      game:
+        $ref: '#/definitions/entity.Game'
+      reservation:
+        $ref: '#/definitions/rest.ReservationResponse'
     type: object
   rest.HealthResponse:
     properties:
@@ -209,12 +178,37 @@ definitions:
         - not_configured
         type: string
     type: object
-  v1.ErrorResponse:
+  rest.ListReservationsResponse:
     properties:
-      error:
+      reservations:
+        items:
+          $ref: '#/definitions/rest.ReservationResponse'
+        type: array
+    type: object
+  rest.ReservationResponse:
+    properties:
+      created_at:
         type: string
-      message:
+      expires_at:
         type: string
+      game_id:
+        type: integer
+      status:
+        type: string
+      wallet_address:
+        type: string
+    type: object
+  rest.ReserveGameResponse:
+    properties:
+      reservation:
+        $ref: '#/definitions/rest.ReservationResponse'
+    type: object
+  rest.ReserveRequest:
+    properties:
+      wallet_address:
+        type: string
+    required:
+    - wallet_address
     type: object
 host: localhost:8090
 info:
@@ -309,6 +303,125 @@ paths:
       summary: Get game details
       tags:
       - games
+  /api/v1/games/{gameId}/reservation:
+    get:
+      consumes:
+      - application/json
+      description: Get the current reservation status for a specific game
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Reservation details
+          schema:
+            $ref: '#/definitions/rest.ReserveGameResponse'
+        "204":
+          description: No reservation exists for this game
+        "400":
+          description: Invalid game ID
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get game reservation
+      tags:
+      - reservations
+  /api/v1/games/{gameId}/reserve:
+    delete:
+      consumes:
+      - application/json
+      description: Cancel an existing reservation for a game. Only the reservation
+        holder can cancel.
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Cancellation request with wallet address
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.ReserveRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: Reservation cancelled
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Not the reservation holder
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Reservation not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Cancel a game reservation
+      tags:
+      - reservations
+    post:
+      consumes:
+      - application/json
+      description: Reserve a game for a specific wallet address to prevent other players
+        from joining
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Reservation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.ReserveRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Reservation created
+          schema:
+            $ref: '#/definitions/rest.ReserveGameResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Game not found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "409":
+          description: Game already reserved or conflict
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Reserve a game
+      tags:
+      - reservations
   /api/v1/health:
     get:
       description: Returns service health status including database connectivity and
@@ -327,6 +440,35 @@ paths:
       summary: Health check endpoint
       tags:
       - health
+  /api/v1/reservations:
+    get:
+      consumes:
+      - application/json
+      description: Get all active reservations for a specific wallet address
+      parameters:
+      - description: Wallet address
+        in: query
+        name: wallet
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of reservations
+          schema:
+            $ref: '#/definitions/rest.ListReservationsResponse'
+        "400":
+          description: Invalid wallet address
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: List reservations by wallet
+      tags:
+      - reservations
   /api/v1/users/{address}:
     get:
       consumes:
@@ -442,57 +584,6 @@ paths:
       summary: Get referral statistics
       tags:
       - users
-  /translation/do-translate:
-    post:
-      consumes:
-      - application/json
-      description: Translate a text
-      operationId: do-translate
-      parameters:
-      - description: Set up translation
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/request.Translate'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/entity.Translation'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/v1.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/v1.ErrorResponse'
-      summary: Translate
-      tags:
-      - translation
-  /translation/history:
-    get:
-      consumes:
-      - application/json
-      description: Show all translation history
-      operationId: history
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/entity.TranslationHistory'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/v1.ErrorResponse'
-      summary: Show history
-      tags:
-      - translation
 schemes:
 - http
 - https

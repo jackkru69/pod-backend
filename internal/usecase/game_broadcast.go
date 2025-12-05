@@ -13,6 +13,27 @@ import (
 	"pod-backend/internal/entity"
 )
 
+// WebSocket message types for reservation events
+const (
+	MessageTypeReservationCreated  = "reservation_created"
+	MessageTypeReservationReleased = "reservation_released"
+)
+
+// ReservationCreatedEvent is sent when a game is reserved
+type ReservationCreatedEvent struct {
+	Type       string `json:"type"`
+	GameID     int64  `json:"game_id"`
+	ReservedBy string `json:"reserved_by"`
+	ExpiresAt  string `json:"expires_at"` // ISO 8601
+}
+
+// ReservationReleasedEvent is sent when a reservation is released
+type ReservationReleasedEvent struct {
+	Type   string `json:"type"`
+	GameID int64  `json:"game_id"`
+	Reason string `json:"reason"` // "expired", "cancelled", "joined"
+}
+
 // WebSocketConn is an interface for WebSocket connections to enable testing
 type WebSocketConn interface {
 	WriteMessage(messageType int, data []byte) error
@@ -230,6 +251,117 @@ func (uc *GameBroadcastUseCase) CloseAllConnections(ctx context.Context) error {
 	log.Info().
 		Int("connections_closed", totalClosed).
 		Msg("All WebSocket connections closed for graceful shutdown")
+
+	return nil
+}
+
+// BroadcastReservationCreated sends a reservation created event to all subscribers of that game
+func (uc *GameBroadcastUseCase) BroadcastReservationCreated(ctx context.Context, reservation *entity.GameReservation) error {
+	event := ReservationCreatedEvent{
+		Type:       MessageTypeReservationCreated,
+		GameID:     reservation.GameID,
+		ReservedBy: reservation.WalletAddress,
+		ExpiresAt:  reservation.ExpiresAt.Format(time.RFC3339),
+	}
+
+	return uc.broadcastEvent(ctx, reservation.GameID, event)
+}
+
+// BroadcastReservationReleased sends a reservation released event to all subscribers of that game
+func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context, gameID int64, reason string) error {
+	event := ReservationReleasedEvent{
+		Type:   MessageTypeReservationReleased,
+		GameID: gameID,
+		Reason: reason,
+	}
+
+	return uc.broadcastEvent(ctx, gameID, event)
+}
+
+// broadcastEvent sends an arbitrary event to all subscribers of a game
+func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64, event interface{}) error {
+	uc.mu.RLock()
+	subscribers := uc.gameSubscribers[gameID]
+	uc.mu.RUnlock()
+
+	if len(subscribers) == 0 {
+		log.Debug().
+			Int64("game_id", gameID).
+			Msg("No subscribers for event broadcast")
+		return nil
+	}
+
+	// Serialize event to JSON
+	message, err := json.Marshal(event)
+	if err != nil {
+		log.Error().
+			Err(err).
+			Int64("game_id", gameID).
+			Msg("Failed to serialize event")
+		return fmt.Errorf("failed to serialize event: %w", err)
+	}
+
+	// Track failed connections for cleanup
+	var failedClients []string
+
+	// Broadcast to all subscribers
+	for clientID, sub := range subscribers {
+		// Set write deadline to prevent slow clients from blocking
+		if err := sub.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			log.Warn().
+				Err(err).
+				Int64("game_id", gameID).
+				Str("client_id", clientID).
+				Msg("Failed to set write deadline")
+			failedClients = append(failedClients, clientID)
+			continue
+		}
+
+		// Send message
+		if err := sub.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			log.Warn().
+				Err(err).
+				Int64("game_id", gameID).
+				Str("client_id", clientID).
+				Msg("Failed to send event to client")
+			failedClients = append(failedClients, clientID)
+			continue
+		}
+
+		log.Debug().
+			Int64("game_id", gameID).
+			Str("client_id", clientID).
+			Int("message_size", len(message)).
+			Msg("Event sent to client")
+	}
+
+	// Clean up failed connections
+	if len(failedClients) > 0 {
+		uc.mu.Lock()
+		for _, clientID := range failedClients {
+			if sub, exists := uc.gameSubscribers[gameID][clientID]; exists {
+				sub.conn.Close()
+				delete(uc.gameSubscribers[gameID], clientID)
+				uc.activeConnections--
+			}
+		}
+		// Clean up empty game map
+		if len(uc.gameSubscribers[gameID]) == 0 {
+			delete(uc.gameSubscribers, gameID)
+		}
+		uc.mu.Unlock()
+
+		log.Info().
+			Int64("game_id", gameID).
+			Int("failed_count", len(failedClients)).
+			Msg("Cleaned up failed WebSocket connections")
+	}
+
+	log.Debug().
+		Int64("game_id", gameID).
+		Int("subscribers", len(subscribers)).
+		Int("failed", len(failedClients)).
+		Msg("Event broadcast completed")
 
 	return nil
 }

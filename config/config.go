@@ -18,6 +18,7 @@ type (
 		NATS        NATS
 		Metrics     Metrics
 		Swagger     Swagger
+		Reservation Reservation
 		GameBackend GameBackend
 	}
 
@@ -70,6 +71,13 @@ type (
 	// Swagger -.
 	Swagger struct {
 		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
+	}
+
+	// Reservation - Game reservation configuration
+	Reservation struct {
+		TimeoutSeconds         int `env:"RESERVATION_TIMEOUT_SECONDS" envDefault:"60"`
+		MaxPerWallet           int `env:"RESERVATION_MAX_PER_WALLET" envDefault:"3"`
+		CleanupIntervalSeconds int `env:"RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
 	}
 
 	// GameBackend - Game backend specific configuration
