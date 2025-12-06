@@ -140,7 +140,7 @@ definitions:
       game:
         $ref: '#/definitions/entity.Game'
       reservation:
-        $ref: '#/definitions/rest.ReservationResponse'
+        $ref: '#/definitions/rest.Reservation'
     type: object
   rest.HealthResponse:
     properties:
@@ -184,6 +184,19 @@ definitions:
         items:
           $ref: '#/definitions/rest.ReservationResponse'
         type: array
+    type: object
+  rest.Reservation:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      game_id:
+        type: integer
+      status:
+        type: string
+      wallet_address:
+        type: string
     type: object
   rest.ReservationResponse:
     properties:

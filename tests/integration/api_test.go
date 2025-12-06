@@ -19,6 +19,7 @@ import (
 	httpRouter "pod-backend/internal/controller/http"
 	"pod-backend/internal/entity"
 	postgresrepo "pod-backend/internal/repository/postgres"
+	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
 )
@@ -390,10 +391,35 @@ func setupTestApp(t *testing.T) *fiber.App {
 		},
 	}
 
-	// Setup routes
+	// Setup logger
 	l := logger.New("info")
-	trans := &mockTranslation{}
-	httpRouter.NewRouter(app, cfg, trans, l, testDB.pg)
+
+	// Create repositories
+	gameRepo := postgresrepo.NewGameRepository(testDB.pg)
+	userRepo := postgresrepo.NewUserRepository(testDB.pg)
+
+	// Create use cases
+	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
+	reservationUC := usecase.NewReservationUseCase(gameRepo, nil, usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	})
+	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
+
+	// Setup routes with RouterDeps
+	deps := httpRouter.RouterDeps{
+		Logger:           l,
+		GameQueryUC:      gameQueryUC,
+		ReservationUC:    reservationUC,
+		UserManagementUC: userManagementUC,
+		BroadcastUC:      nil, // Not needed for tests
+		TONClient:        nil, // Not needed for tests
+		BlockchainHandler: nil, // Not needed for tests
+		PG:               testDB.pg,
+		GameRepo:         gameRepo,
+	}
+	httpRouter.NewRouter(app, cfg, deps)
 
 	return app
 }
@@ -471,16 +497,6 @@ func seedGameWithUser(t *testing.T, game *entity.Game) {
 	})
 	// Create the game
 	seedGame(t, game)
-}
-
-type mockTranslation struct{}
-
-func (m *mockTranslation) Translate(ctx context.Context, t entity.Translation) (entity.Translation, error) {
-	return t, nil
-}
-
-func (m *mockTranslation) History(context.Context) (entity.TranslationHistory, error) {
-	return entity.TranslationHistory{}, nil
 }
 
 // TestUserProfile tests user profile endpoints (T065-T068)

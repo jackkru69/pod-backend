@@ -761,7 +761,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/entity.Game"
                 },
                 "reservation": {
-                    "$ref": "#/definitions/rest.ReservationResponse"
+                    "$ref": "#/definitions/rest.Reservation"
                 }
             }
         },
@@ -822,6 +822,26 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/rest.ReservationResponse"
                     }
+                }
+            }
+        },
+        "rest.Reservation": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
                 }
             }
         },

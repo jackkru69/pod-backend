@@ -63,25 +63,28 @@ func (h *GameHandler) ListGames(c *fiber.Ctx) error {
 		})
 	}
 
-	// Build response with reservation status for each game
+	// Wrap games with reservation status
 	gamesWithReservation := make([]GameWithReservation, len(games))
 	for i, game := range games {
-		gwr := GameWithReservation{Game: game}
+		var reservation *Reservation
 
-		// Check if game has an active reservation
+		// Lookup reservation for this game
 		if h.reservationUC != nil {
-			if reservation, err := h.reservationUC.GetReservation(c.Context(), game.GameID); err == nil && reservation != nil {
-				gwr.Reservation = &ReservationResponse{
-					GameID:        reservation.GameID,
-					WalletAddress: reservation.WalletAddress,
-					CreatedAt:     reservation.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-					ExpiresAt:     reservation.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
-					Status:        reservation.Status,
+			if res, err := h.reservationUC.GetReservation(c.Context(), game.GameID); err == nil && res != nil {
+				reservation = &Reservation{
+					GameID:        res.GameID,
+					WalletAddress: res.WalletAddress,
+					CreatedAt:     res.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+					ExpiresAt:     res.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+					Status:        res.Status,
 				}
 			}
 		}
 
-		gamesWithReservation[i] = gwr
+		gamesWithReservation[i] = GameWithReservation{
+			Game:        game,
+			Reservation: reservation,
+		}
 	}
 
 	// Count total (for now, return length of results - in production this would be a separate count query)
@@ -173,10 +176,19 @@ type GameListResponse struct {
 	Offset int                   `json:"offset"`
 }
 
-// GameWithReservation represents a game with its reservation status
+// GameWithReservation wraps a game with its reservation status
 type GameWithReservation struct {
-	Game        *entity.Game         `json:"game"`
-	Reservation *ReservationResponse `json:"reservation,omitempty"`
+	Game        *entity.Game `json:"game"`
+	Reservation *Reservation `json:"reservation,omitempty"`
+}
+
+// Reservation represents a game reservation
+type Reservation struct {
+	GameID        int64  `json:"game_id"`
+	WalletAddress string `json:"wallet_address"`
+	CreatedAt     string `json:"created_at"`
+	ExpiresAt     string `json:"expires_at"`
+	Status        string `json:"status"`
 }
 
 // ErrorResponse represents an error response
