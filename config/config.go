@@ -99,8 +99,8 @@ type (
 		WebSocketReconnectMax int    `env:"WS_RECONNECT_MAX_ATTEMPTS" envDefault:"10"` // Max reconnection attempts before fallback
 		WebSocketPingInterval string `env:"WS_PING_INTERVAL" envDefault:"30s"`         // WebSocket ping interval for health check
 		// Blockchain Polling Configuration
-		MinPollInterval       string `env:"MIN_POLL_INTERVAL" envDefault:"5s"`         // Minimum polling interval when active
-		MaxPollInterval       string `env:"MAX_POLL_INTERVAL" envDefault:"30s"`        // Maximum polling interval when idle
+		MinPollInterval string `env:"MIN_POLL_INTERVAL" envDefault:"5s"`  // Minimum polling interval when active
+		MaxPollInterval string `env:"MAX_POLL_INTERVAL" envDefault:"30s"` // Maximum polling interval when idle
 	}
 )
 

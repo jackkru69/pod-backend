@@ -193,7 +193,7 @@ func (h *GameWebSocketHandler) handleClientMessage(gameID int64, clientID string
 func (h *GameWebSocketHandler) RegisterRoutes(app *fiber.App) {
 	// Global WebSocket endpoint for all game updates: /ws/games
 	app.Get("/ws/games", h.GlobalUpgradeCheck, websocket.New(h.HandleGlobalConnection))
-	
+
 	// Game-specific WebSocket upgrade endpoint: /ws/games/:id
 	app.Get("/ws/games/:id", h.UpgradeCheck, websocket.New(h.HandleConnection))
 

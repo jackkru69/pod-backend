@@ -37,9 +37,9 @@ type Poller struct {
 	handler           EventHandler
 	logger            logger.Interface
 	currentInterval   time.Duration
-	minInterval       time.Duration   // Configurable minimum interval
-	maxInterval       time.Duration   // Configurable maximum interval
-	lastProcessedLt   string          // Last processed logical time (lt)
+	minInterval       time.Duration // Configurable minimum interval
+	maxInterval       time.Duration // Configurable maximum interval
+	lastProcessedLt   string        // Last processed logical time (lt)
 	ticker            *time.Ticker
 	stopCh            chan struct{}
 	backoffDuration   time.Duration   // Current exponential backoff duration (T103)

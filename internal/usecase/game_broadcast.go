@@ -18,7 +18,7 @@ const (
 	MessageTypeReservationCreated  = "reservation_created"
 	MessageTypeReservationReleased = "reservation_released"
 	MessageTypeGameUpdate          = "game_update"
-	
+
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
 )
