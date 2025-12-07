@@ -47,10 +47,12 @@ func New(config ...Config) fiber.Handler {
 	instance := limiter.New(store, rate)
 
 	return func(c *fiber.Ctx) error {
-		// Skip rate limiting for health check and documentation
-		if c.Path() == "/health" || c.Path() == "/metrics" ||
-			c.Path() == "/swagger" || c.Path() == "/api/docs" ||
-			len(c.Path()) > 8 && c.Path()[:8] == "/swagger" {
+		// Skip rate limiting for health check, documentation, and WebSocket endpoints
+		path := c.Path()
+		if path == "/health" || path == "/healthz" || path == "/metrics" ||
+			path == "/swagger" || path == "/api/docs" ||
+			(len(path) > 8 && path[:8] == "/swagger") ||
+			(len(path) >= 3 && path[:3] == "/ws") {
 			return c.Next()
 		}
 

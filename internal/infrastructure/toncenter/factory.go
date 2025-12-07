@@ -30,6 +30,8 @@ type FactoryConfig struct {
 	CircuitBreakerMaxFail int
 	CircuitBreakerTimeout time.Duration
 	HTTPTimeout           time.Duration
+	MinPollInterval       time.Duration // Minimum polling interval when active
+	MaxPollInterval       time.Duration // Maximum polling interval when idle
 
 	// WebSocket Configuration
 	V3WSURL         string
@@ -105,7 +107,14 @@ func (f *EventSourceFactory) CreateEventSource(handler EventHandler) (EventSourc
 
 // createHTTPPoller creates an HTTP polling event source.
 func (f *EventSourceFactory) createHTTPPoller(handler EventHandler) *Poller {
-	poller := NewPoller(f.httpClient, handler, f.logger, 0)
+	poller := NewPollerWithIntervals(
+		f.httpClient,
+		handler,
+		f.logger,
+		0,
+		f.config.MinPollInterval,
+		f.config.MaxPollInterval,
+	)
 	f.currentSource = poller
 	return poller
 }

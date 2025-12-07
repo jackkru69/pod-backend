@@ -191,10 +191,124 @@ func (h *GameWebSocketHandler) handleClientMessage(gameID int64, clientID string
 
 // RegisterRoutes registers WebSocket routes with Fiber app
 func (h *GameWebSocketHandler) RegisterRoutes(app *fiber.App) {
-	// WebSocket upgrade endpoint: /ws/games/:id
+	// Global WebSocket endpoint for all game updates: /ws/games
+	app.Get("/ws/games", h.GlobalUpgradeCheck, websocket.New(h.HandleGlobalConnection))
+	
+	// Game-specific WebSocket upgrade endpoint: /ws/games/:id
 	app.Get("/ws/games/:id", h.UpgradeCheck, websocket.New(h.HandleConnection))
 
-	log.Info().Msg("WebSocket routes registered: /ws/games/:id")
+	log.Info().Msg("WebSocket routes registered: /ws/games (global), /ws/games/:id (per-game)")
+}
+
+// GlobalUpgradeCheck validates WebSocket upgrade requests for global subscription
+func (h *GameWebSocketHandler) GlobalUpgradeCheck(c *fiber.Ctx) error {
+	// Validate WebSocket upgrade headers
+	if !websocket.IsWebSocketUpgrade(c) {
+		return fiber.ErrUpgradeRequired
+	}
+
+	// No game ID validation needed for global subscription
+	return c.Next()
+}
+
+// HandleGlobalConnection handles WebSocket connection for global game updates
+func (h *GameWebSocketHandler) HandleGlobalConnection(c *websocket.Conn) {
+	ctx := context.Background()
+
+	// Generate unique client ID
+	clientID := uuid.New().String()
+
+	// Subscribe to ALL game updates (gameID = 0)
+	h.broadcastUseCase.Subscribe(ctx, 0, clientID, c)
+	defer h.broadcastUseCase.Unsubscribe(ctx, 0, clientID)
+
+	log.Info().
+		Str("client_id", clientID).
+		Str("remote_addr", c.RemoteAddr().String()).
+		Msg("Global WebSocket connection established")
+
+	// Set up ping/pong handlers
+	c.SetPongHandler(func(appData string) error {
+		log.Debug().
+			Str("client_id", clientID).
+			Msg("Received pong from global client")
+
+		// Extend read deadline on pong
+		return c.SetReadDeadline(time.Now().Add(h.pongWait))
+	})
+
+	// Set initial read deadline
+	if err := c.SetReadDeadline(time.Now().Add(h.pongWait)); err != nil {
+		log.Error().
+			Err(err).
+			Str("client_id", clientID).
+			Msg("Failed to set initial read deadline for global connection")
+		return
+	}
+
+	// Start ping ticker
+	ticker := time.NewTicker(h.pingInterval)
+	defer ticker.Stop()
+
+	// Channel to signal connection closure
+	done := make(chan struct{})
+
+	// Goroutine to send periodic pings
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-ticker.C:
+				// Send ping
+				if err := c.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(10*time.Second)); err != nil {
+					log.Warn().
+						Err(err).
+						Str("client_id", clientID).
+						Msg("Failed to send ping to global client, closing connection")
+					return
+				}
+				log.Debug().
+					Str("client_id", clientID).
+					Msg("Sent ping to global client")
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// Read loop (to detect client disconnection and handle pongs)
+	for {
+		messageType, message, err := c.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Warn().
+					Err(err).
+					Str("client_id", clientID).
+					Msg("Global WebSocket connection closed unexpectedly")
+			} else {
+				log.Info().
+					Str("client_id", clientID).
+					Msg("Global WebSocket connection closed normally")
+			}
+			break
+		}
+
+		// Handle client messages (if any)
+		h.handleGlobalClientMessage(clientID, messageType, message)
+	}
+
+	log.Info().
+		Str("client_id", clientID).
+		Msg("Global WebSocket connection handler completed")
+}
+
+// handleGlobalClientMessage processes messages received from global WebSocket client
+func (h *GameWebSocketHandler) handleGlobalClientMessage(clientID string, messageType int, message []byte) {
+	log.Debug().
+		Str("client_id", clientID).
+		Int("message_type", messageType).
+		Int("message_size", len(message)).
+		Msg("Received message from global WebSocket client (no action)")
 }
 
 // GetConnectionCount returns the number of active WebSocket connections

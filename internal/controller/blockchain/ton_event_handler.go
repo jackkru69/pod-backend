@@ -45,6 +45,19 @@ func NewTONEventHandler(
 		logger.Warn("Failed to parse WebSocket ping interval, using default 30s: %v", err)
 	}
 
+	// Parse polling intervals
+	minPollInterval, err := time.ParseDuration(cfg.GameBackend.MinPollInterval)
+	if err != nil {
+		minPollInterval = 5 * time.Second
+		logger.Warn("Failed to parse min poll interval, using default 5s: %v", err)
+	}
+
+	maxPollInterval, err := time.ParseDuration(cfg.GameBackend.MaxPollInterval)
+	if err != nil {
+		maxPollInterval = 30 * time.Second
+		logger.Warn("Failed to parse max poll interval, using default 30s: %v", err)
+	}
+
 	// Create EventSourceFactory with WebSocket/HTTP configuration (T154)
 	factory := toncenter.NewEventSourceFactory(toncenter.FactoryConfig{
 		// HTTP Polling Configuration
@@ -53,6 +66,8 @@ func NewTONEventHandler(
 		CircuitBreakerMaxFail: cfg.GameBackend.CircuitBreakerMaxFail,
 		CircuitBreakerTimeout: circuitBreakerTimeout,
 		HTTPTimeout:           30 * time.Second,
+		MinPollInterval:       minPollInterval,
+		MaxPollInterval:       maxPollInterval,
 
 		// WebSocket Configuration (T154)
 		V3WSURL:         cfg.GameBackend.TONCenterV3WSURL,

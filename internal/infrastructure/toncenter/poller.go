@@ -2,6 +2,7 @@ package toncenter
 
 import (
 	"context"
+	"math/big"
 	"sync/atomic"
 	"time"
 
@@ -36,7 +37,9 @@ type Poller struct {
 	handler           EventHandler
 	logger            logger.Interface
 	currentInterval   time.Duration
-	lastProcessedLt   string // Last processed logical time (lt)
+	minInterval       time.Duration   // Configurable minimum interval
+	maxInterval       time.Duration   // Configurable maximum interval
+	lastProcessedLt   string          // Last processed logical time (lt)
 	ticker            *time.Ticker
 	stopCh            chan struct{}
 	backoffDuration   time.Duration   // Current exponential backoff duration (T103)
@@ -53,7 +56,23 @@ func NewPoller(client *Client, handler EventHandler, logger logger.Interface, st
 		handler:         handler,
 		logger:          logger,
 		currentInterval: MaxPollInterval, // Start slow
-		lastProcessedLt: "0",             // Start from beginning
+		minInterval:     MinPollInterval, // Use default constants
+		maxInterval:     MaxPollInterval,
+		lastProcessedLt: "0", // Start from beginning
+		stopCh:          make(chan struct{}),
+	}
+}
+
+// NewPollerWithIntervals creates a new poller with custom intervals.
+func NewPollerWithIntervals(client *Client, handler EventHandler, logger logger.Interface, startBlock int64, minInterval, maxInterval time.Duration) *Poller {
+	return &Poller{
+		client:          client,
+		handler:         handler,
+		logger:          logger,
+		currentInterval: maxInterval, // Start slow
+		minInterval:     minInterval,
+		maxInterval:     maxInterval,
+		lastProcessedLt: "0", // Start from beginning
 		stopCh:          make(chan struct{}),
 	}
 }
@@ -98,6 +117,19 @@ func (p *Poller) Stop() {
 	close(p.stopCh)
 }
 
+// compareLt compares two logical time strings as big integers.
+// Returns true if lt1 > lt2 (lt1 is newer than lt2).
+func compareLt(lt1, lt2 string) bool {
+	// Parse as big integers to handle large lt values
+	n1 := new(big.Int)
+	n2 := new(big.Int)
+
+	n1.SetString(lt1, 10)
+	n2.SetString(lt2, 10)
+
+	return n1.Cmp(n2) > 0
+}
+
 // poll performs a single poll cycle.
 func (p *Poller) poll(ctx context.Context) {
 	p.logger.Debug("Polling from lt %s", p.lastProcessedLt)
@@ -115,9 +147,10 @@ func (p *Poller) poll(ctx context.Context) {
 	p.backoffDuration = BackoffInitial
 
 	// Filter out already processed transactions (lt <= lastProcessedLt)
+	// Use numeric comparison, not lexicographic (string) comparison
 	var newTxs []Transaction
 	for _, tx := range txs {
-		if tx.Lt() > p.lastProcessedLt {
+		if compareLt(tx.Lt(), p.lastProcessedLt) {
 			newTxs = append(newTxs, tx)
 		}
 	}
@@ -140,7 +173,8 @@ func (p *Poller) poll(ctx context.Context) {
 
 		// Update last processed logical time (lt)
 		// TON uses lt (logical time) for transaction ordering, higher lt means newer
-		if tx.Lt() > p.lastProcessedLt {
+		// Use numeric comparison instead of string comparison
+		if compareLt(tx.Lt(), p.lastProcessedLt) {
 			p.lastProcessedLt = tx.Lt()
 			maxLt = tx.Lt()
 		}
@@ -187,14 +221,14 @@ func (p *Poller) adjustInterval(hasActivity bool) {
 	if hasActivity {
 		// Activity detected: decrease interval (poll faster)
 		p.currentInterval = p.currentInterval * 2 / 3
-		if p.currentInterval < MinPollInterval {
-			p.currentInterval = MinPollInterval
+		if p.currentInterval < p.minInterval {
+			p.currentInterval = p.minInterval
 		}
 	} else {
 		// No activity: increase interval (poll slower)
 		p.currentInterval = p.currentInterval * 3 / 2
-		if p.currentInterval > MaxPollInterval {
-			p.currentInterval = MaxPollInterval
+		if p.currentInterval > p.maxInterval {
+			p.currentInterval = p.maxInterval
 		}
 	}
 

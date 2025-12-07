@@ -123,7 +123,8 @@ pod-backend/
 
 ### WebSocket
 
-- `WS /ws/games/:gameId` - Subscribe to real-time game updates
+- `WS /ws/games` - Subscribe to ALL game updates (global subscription)
+- `WS /ws/games/:gameId` - Subscribe to specific game updates
 
 ### System Endpoints
 

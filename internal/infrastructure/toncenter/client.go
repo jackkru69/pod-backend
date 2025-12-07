@@ -98,7 +98,9 @@ func (c *Client) GetTransactions(ctx context.Context, fromBlock int64, limit int
 func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
 	// TON Center API v2 uses REST format with /getTransactions endpoint
 	// The base URL should not include /api/v2/ as it's added here
-	url := fmt.Sprintf("%s/getTransactions?address=%s&limit=%d&to_lt=0&archival=false",
+	// Note: We omit to_lt to fetch the latest transactions (TON API returns newest first)
+	// Filtering by lastProcessedLt is done in poller.go after fetching
+	url := fmt.Sprintf("%s/getTransactions?address=%s&limit=%d&archival=true",
 		c.v2BaseURL,
 		c.contractAddress,
 		limit,

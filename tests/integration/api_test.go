@@ -409,15 +409,15 @@ func setupTestApp(t *testing.T) *fiber.App {
 
 	// Setup routes with RouterDeps
 	deps := httpRouter.RouterDeps{
-		Logger:           l,
-		GameQueryUC:      gameQueryUC,
-		ReservationUC:    reservationUC,
-		UserManagementUC: userManagementUC,
-		BroadcastUC:      nil, // Not needed for tests
-		TONClient:        nil, // Not needed for tests
+		Logger:            l,
+		GameQueryUC:       gameQueryUC,
+		ReservationUC:     reservationUC,
+		UserManagementUC:  userManagementUC,
+		BroadcastUC:       nil, // Not needed for tests
+		TONClient:         nil, // Not needed for tests
 		BlockchainHandler: nil, // Not needed for tests
-		PG:               testDB.pg,
-		GameRepo:         gameRepo,
+		PG:                testDB.pg,
+		GameRepo:          gameRepo,
 	}
 	httpRouter.NewRouter(app, cfg, deps)
 

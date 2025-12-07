@@ -40,6 +40,12 @@ func New(cfg Config) fiber.Handler {
 			"Accept",
 			"Authorization",
 			"X-Telegram-Init-Data",
+			"Upgrade",
+			"Connection",
+			"Sec-WebSocket-Key",
+			"Sec-WebSocket-Version",
+			"Sec-WebSocket-Extensions",
+			"Sec-WebSocket-Protocol",
 		}, ","),
 		AllowCredentials: true,
 		MaxAge:           86400, // 24 hours
