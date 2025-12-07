@@ -360,6 +360,8 @@ func (r *GameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAd
 		Set("joined_at", now).
 		Set("join_tx_hash", joinTxHash).
 		Set("status", entity.GameStatusWaitingForOpenBids).
+		Set("player_one_choice", entity.CoinSideClosed). // Set to CLOSED (1) when game starts
+		Set("player_two_choice", entity.CoinSideClosed). // Both players have unrevealed choices
 		Where("game_id = ?", gameID).
 		ToSql()
 	if err != nil {

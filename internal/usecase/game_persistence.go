@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 
 	"pod-backend/internal/entity"
@@ -55,6 +56,17 @@ func extractInt64(data map[string]interface{}, key string) (int64, error) {
 	case float64:
 		return int64(v), nil
 	case int:
+		return int64(v), nil
+	case uint8:
+		return int64(v), nil
+	case uint16:
+		return int64(v), nil
+	case uint32:
+		return int64(v), nil
+	case uint64:
+		if v > math.MaxInt64 {
+			return 0, fmt.Errorf("%s value too large: %d", key, v)
+		}
 		return int64(v), nil
 	case string:
 		// Also handle string numbers (e.g., bet_amount from TON)
@@ -446,18 +458,19 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 	}
 
 	// Extract event data
-	playerAddress, ok := event.EventData["player"].(string)
-	if !ok {
-		return fmt.Errorf("missing or invalid player in event data")
+	playerAddress, err := extractString(event.EventData, "player")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	choice, ok := event.EventData["choice"].(int64)
-	if !ok {
-		return fmt.Errorf("missing or invalid choice in event data")
+	// Use coin_side key as defined in SecretOpenedNotify message in smart contract
+	coinSide, err := extractInt64(event.EventData, "coin_side")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
 	}
 
 	// Update game with revealed choice
-	if err := uc.gameRepo.RevealChoice(ctx, event.GameID, playerAddress, int(choice), event.TransactionHash); err != nil {
+	if err := uc.gameRepo.RevealChoice(ctx, event.GameID, playerAddress, int(coinSide), event.TransactionHash); err != nil {
 		return fmt.Errorf("failed to reveal choice: %w", err)
 	}
 

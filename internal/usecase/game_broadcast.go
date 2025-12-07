@@ -17,7 +17,7 @@ import (
 const (
 	MessageTypeReservationCreated  = "reservation_created"
 	MessageTypeReservationReleased = "reservation_released"
-	MessageTypeGameUpdate          = "game_update"
+	MessageTypeGameStateUpdate          = "game_state_update"
 
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
@@ -151,10 +151,10 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdate(ctx context.Context, game *e
 		return nil
 	}
 
-	// Wrap game in a message with type
+	// Create game update message matching OpenAPI spec
 	message, err := json.Marshal(map[string]interface{}{
-		"type": MessageTypeGameUpdate,
-		"game": game,
+		"type": MessageTypeGameStateUpdate,
+		"data": game,
 	})
 	if err != nil {
 		log.Error().
