@@ -40,13 +40,12 @@ type Poller struct {
 	minInterval       time.Duration // Configurable minimum interval
 	maxInterval       time.Duration // Configurable maximum interval
 	lastProcessedLt   string        // Last processed logical time (lt)
-	lastProcessedHash string        // Last processed transaction hash (required with lt)
 	ticker            *time.Ticker
 	stopCh            chan struct{}
-	backoffDuration   time.Duration                 // Current exponential backoff duration (T103)
-	consecutiveErrors int                           // Count for exponential backoff
-	isRunning         atomic.Bool                   // Track if poller is running (T149)
-	onLtUpdated       func(lt string, hash string) // Callback when last processed lt and hash are updated
+	backoffDuration   time.Duration   // Current exponential backoff duration (T103)
+	consecutiveErrors int             // Count for exponential backoff
+	isRunning         atomic.Bool     // Track if poller is running (T149)
+	onLtUpdated       func(lt string) // Callback when last processed lt is updated
 }
 
 // NewPoller creates a new adaptive blockchain poller.
@@ -78,9 +77,9 @@ func NewPollerWithIntervals(client *Client, handler EventHandler, logger logger.
 	}
 }
 
-// SetOnLtUpdated sets a callback that is called when last_processed_lt and hash are updated.
+// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
 // Used to persist the state to database.
-func (p *Poller) SetOnLtUpdated(callback func(lt string, hash string)) {
+func (p *Poller) SetOnLtUpdated(callback func(lt string)) {
 	p.onLtUpdated = callback
 }
 
@@ -133,11 +132,10 @@ func compareLt(lt1, lt2 string) bool {
 
 // poll performs a single poll cycle.
 func (p *Poller) poll(ctx context.Context) {
-	p.logger.Debug("Polling from lt %s hash %s", p.lastProcessedLt, p.lastProcessedHash)
+	p.logger.Debug("Polling from lt %s", p.lastProcessedLt)
 
-	// Use GetTransactionsFromLt with lt and hash for proper pagination
-	// According to TON Center API, lt and hash must be sent together
-	txs, err := p.client.GetTransactionsFromLt(ctx, p.lastProcessedLt, p.lastProcessedHash, PollBatchSize)
+	// Note: fromBlock parameter is not actually used by TON Center REST API
+	txs, err := p.client.GetTransactions(ctx, 0, PollBatchSize)
 	if err != nil {
 		p.logger.Error("Failed to fetch transactions", err)
 		p.handleError() // Exponential backoff (T103)
@@ -148,71 +146,43 @@ func (p *Poller) poll(ctx context.Context) {
 	p.consecutiveErrors = 0
 	p.backoffDuration = BackoffInitial
 
-	// Special case: if starting from lt=0, take the first (latest) transaction as starting point
-	if p.lastProcessedLt == "0" && len(txs) > 0 {
-		// Take the most recent transaction as our starting point
-		latestTx := txs[0]
-		p.lastProcessedLt = latestTx.Lt()
-		p.lastProcessedHash = latestTx.Hash()
-		p.logger.Info("Starting from latest transaction lt=%s hash=%s", p.lastProcessedLt, p.lastProcessedHash)
-
-		// Persist initial position to database
-		if p.onLtUpdated != nil {
-			p.onLtUpdated(p.lastProcessedLt, p.lastProcessedHash)
-		}
-
-		p.adjustInterval(false) // No new transactions to process yet
-		return
-	}
-
 	// Filter out already processed transactions (lt <= lastProcessedLt)
-	// Server-side pagination gives us transactions starting from our position
-	// but we still need to skip the starting transaction itself
+	// Use numeric comparison, not lexicographic (string) comparison
 	var newTxs []Transaction
 	for _, tx := range txs {
-		// Skip if this is the same transaction we started from
-		if tx.Lt() == p.lastProcessedLt && tx.Hash() == p.lastProcessedHash {
-			continue
+		if compareLt(tx.Lt(), p.lastProcessedLt) {
+			newTxs = append(newTxs, tx)
 		}
-		// Skip if already processed (shouldn't happen with correct API usage)
-		if compareLt(tx.Lt(), p.lastProcessedLt) || tx.Lt() == p.lastProcessedLt {
-			continue
-		}
-		newTxs = append(newTxs, tx)
 	}
 
 	if len(newTxs) == 0 {
-		p.logger.Debug("No new transactions (fetched %d, filtered %d)", len(txs), len(txs)-len(newTxs))
+		p.logger.Debug("No new transactions (filtered %d already processed)", len(txs))
 		p.adjustInterval(false) // Slow down when idle
 		return
 	}
 
-	p.logger.Info("Found %d new transactions (fetched %d total)", len(newTxs), len(txs))
+	p.logger.Info("Found %d new transactions (filtered %d already processed)", len(newTxs), len(txs)-len(newTxs))
 
 	// Process transactions
 	var maxLt string
-	var maxHash string
 	for _, tx := range newTxs {
 		if err := p.handler.HandleTransaction(ctx, tx); err != nil {
 			p.logger.Error("Failed to handle transaction hash=%s: %v", tx.Hash(), err)
 			continue
 		}
 
-		// Update last processed logical time (lt) and hash
+		// Update last processed logical time (lt)
 		// TON uses lt (logical time) for transaction ordering, higher lt means newer
-		// We need both lt and hash for proper API pagination
+		// Use numeric comparison instead of string comparison
 		if compareLt(tx.Lt(), p.lastProcessedLt) {
 			p.lastProcessedLt = tx.Lt()
-			p.lastProcessedHash = tx.Hash()
 			maxLt = tx.Lt()
-			maxHash = tx.Hash()
 		}
 	}
 
-	// Persist updated lt and hash to database via callback
+	// Persist updated lt to database via callback
 	if maxLt != "" && p.onLtUpdated != nil {
-		p.onLtUpdated(maxLt, maxHash)
-		p.logger.Debug("Updated last processed position to lt=%s hash=%s", maxLt, maxHash)
+		p.onLtUpdated(maxLt)
 	}
 
 	// Speed up when activity detected
@@ -295,14 +265,6 @@ func (p *Poller) GetLastProcessedLt() string {
 func (p *Poller) SetLastProcessedLt(lt string) {
 	p.lastProcessedLt = lt
 	p.logger.Info("Set last processed lt to %s", lt)
-}
-
-// SetLastProcessedHash updates the starting transaction hash for polling.
-// Must be used together with SetLastProcessedLt for proper TON API pagination.
-// Useful for resuming from database state.
-func (p *Poller) SetLastProcessedHash(hash string) {
-	p.lastProcessedHash = hash
-	p.logger.Info("Set last processed hash to %s", hash)
 }
 
 // Subscribe registers an event handler (T149).

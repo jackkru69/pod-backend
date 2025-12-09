@@ -121,24 +121,22 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		l.Fatal(fmt.Errorf("app - Run - blockchainctrl.NewTONEventHandler: %w", err))
 	}
 
-	// Load last processed lt and hash from database to resume from saved state
+	// Load last processed lt from database to resume from saved state
 	ctx := context.Background()
-	lastLt, lastHash, err := syncStateRepo.GetLastProcessedLt(ctx)
+	lastLt, err := syncStateRepo.GetLastProcessedLt(ctx)
 	if err != nil {
 		log.Warn().Err(err).Msg("Failed to load last processed lt from database, starting from 0")
 		lastLt = "0"
-		lastHash = ""
 	}
 	if lastLt != "0" {
-		log.Info().Str("lt", lastLt).Str("hash", lastHash).Msg("Resuming blockchain subscription from saved state")
+		log.Info().Str("lt", lastLt).Msg("Resuming blockchain subscription from saved state")
 		blockchainHandler.SetLastProcessedLt(lastLt)
-		blockchainHandler.SetLastProcessedHash(lastHash)
 	}
 
-	// Set callback to persist lt and hash updates to database
-	blockchainHandler.SetOnLtUpdated(func(lt string, hash string) {
-		if err := syncStateRepo.UpdateLastProcessedLt(ctx, lt, hash); err != nil {
-			log.Error().Err(err).Str("lt", lt).Str("hash", hash).Msg("Failed to persist last processed lt and hash")
+	// Set callback to persist lt updates to database
+	blockchainHandler.SetOnLtUpdated(func(lt string) {
+		if err := syncStateRepo.UpdateLastProcessedLt(ctx, lt); err != nil {
+			log.Error().Err(err).Str("lt", lt).Msg("Failed to persist last processed lt")
 		}
 	})
 

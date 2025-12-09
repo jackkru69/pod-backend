@@ -43,14 +43,12 @@ type BlockchainSyncStateRepository interface {
 	// Also updates websocket_connected status for WebSocket sources.
 	SetEventSourceType(ctx context.Context, sourceType EventSourceType, connected bool) error
 
-	// UpdateLastProcessedLt atomically updates the last processed logical time (lt) and hash (T146).
+	// UpdateLastProcessedLt atomically updates the last processed logical time (lt) (T146).
 	// This operation must be atomic for TON blockchain event ordering.
-	// The lt and hash must be updated together as they are required for TON API pagination.
-	UpdateLastProcessedLt(ctx context.Context, lt string, hash string) error
+	UpdateLastProcessedLt(ctx context.Context, lt string) error
 
-	// GetLastProcessedLt returns the last processed logical time (lt) and hash (T146).
-	// Returns both lt and hash as they must be used together for TON API pagination.
-	GetLastProcessedLt(ctx context.Context) (lt string, hash string, err error)
+	// GetLastProcessedLt returns the last processed logical time (lt) (T146).
+	GetLastProcessedLt(ctx context.Context) (string, error)
 
 	// RecordFallback increments the fallback counter and sets fallback timestamp (T146).
 	// Called when WebSocket falls back to HTTP polling.

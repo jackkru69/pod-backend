@@ -278,17 +278,6 @@ func (uc *BlockchainSubscriberUseCase) SetLastProcessedLt(lt string) {
 	uc.eventSource.SetLastProcessedLt(lt)
 }
 
-// SetLastProcessedHash updates the starting transaction hash for event processing.
-// Must be used together with SetLastProcessedLt for proper TON API pagination.
-// Useful for resuming from database state after restart.
-func (uc *BlockchainSubscriberUseCase) SetLastProcessedHash(hash string) {
-	uc.logger.Info("Setting last processed hash=%s", hash)
-	// Delegate to event source if it supports hash (Poller does, WebSocket might not)
-	if poller, ok := uc.eventSource.(*toncenter.Poller); ok {
-		poller.SetLastProcessedHash(hash)
-	}
-}
-
 // GetSourceType returns the type of event source being used ("websocket" or "http").
 // T152: Added for runtime monitoring and logging.
 func (uc *BlockchainSubscriberUseCase) GetSourceType() string {

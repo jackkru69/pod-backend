@@ -82,26 +82,9 @@ func (t *Transaction) Lt() string {
 
 // GetTransactions retrieves transactions for the contract starting from a specific block.
 // Uses circuit breaker to prevent cascading failures.
-// Deprecated: Use GetTransactionsFromLt instead for proper TON lt-based filtering.
 func (c *Client) GetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
 	result, err := c.circuitBreaker.Execute(func() (interface{}, error) {
-		return c.doGetTransactions(ctx, "", "", limit)
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("circuit breaker: %w", err)
-	}
-
-	return result.([]Transaction), nil
-}
-
-// GetTransactionsFromLt retrieves transactions for the contract with lt-based filtering.
-// The lt and hash parameters specify where to start pagination (must be used together).
-// Set lt to "" or "0" to fetch from the beginning (latest transactions).
-// Uses circuit breaker to prevent cascading failures.
-func (c *Client) GetTransactionsFromLt(ctx context.Context, lt string, hash string, limit int) ([]Transaction, error) {
-	result, err := c.circuitBreaker.Execute(func() (interface{}, error) {
-		return c.doGetTransactions(ctx, lt, hash, limit)
+		return c.doGetTransactions(ctx, fromBlock, limit)
 	})
 
 	if err != nil {
@@ -112,22 +95,16 @@ func (c *Client) GetTransactionsFromLt(ctx context.Context, lt string, hash stri
 }
 
 // doGetTransactions performs the actual HTTP request to TON Center API v2 (REST).
-// The lt and hash parameters specify pagination start point (must be used together).
-// According to TON Center API docs, lt and hash must be sent together for pagination.
-func (c *Client) doGetTransactions(ctx context.Context, lt string, hash string, limit int) ([]Transaction, error) {
+func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
 	// TON Center API v2 uses REST format with /getTransactions endpoint
 	// The base URL should not include /api/v2/ as it's added here
+	// Note: We omit to_lt to fetch the latest transactions (TON API returns newest first)
+	// Filtering by lastProcessedLt is done in poller.go after fetching
 	url := fmt.Sprintf("%s/getTransactions?address=%s&limit=%d&archival=true",
 		c.v2BaseURL,
 		c.contractAddress,
 		limit,
 	)
-
-	// Add lt and hash parameters for pagination (must be used together)
-	// This tells the API to start from this specific transaction
-	if lt != "" && lt != "0" {
-		url += fmt.Sprintf("&lt=%s", lt)
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
