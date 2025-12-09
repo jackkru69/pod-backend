@@ -20,7 +20,7 @@ type TONEventHandler struct {
 	logger       logger.Interface
 	ctx          context.Context
 	cancel       context.CancelFunc
-	onLtUpdated  func(lt string) // Callback to persist lt to database
+	onLtUpdated  func(lt string, hash string) // Callback to persist lt and hash to database
 }
 
 // NewTONEventHandler creates a new blockchain event handler.
@@ -189,9 +189,16 @@ func (h *TONEventHandler) SetLastProcessedLt(lt string) {
 	h.subscriberUC.SetLastProcessedLt(lt)
 }
 
-// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+// SetLastProcessedHash sets the starting transaction hash for blockchain polling.
+// Should be called before Start() to resume from database state.
+// Must be used together with SetLastProcessedLt for proper TON API pagination.
+func (h *TONEventHandler) SetLastProcessedHash(hash string) {
+	h.subscriberUC.SetLastProcessedHash(hash)
+}
+
+// SetOnLtUpdated sets a callback that is called when last_processed_lt and hash are updated.
 // Used to persist the state to database after processing transactions.
-func (h *TONEventHandler) SetOnLtUpdated(callback func(lt string)) {
+func (h *TONEventHandler) SetOnLtUpdated(callback func(lt string, hash string)) {
 	h.onLtUpdated = callback
 	// Also set callback on the factory/event source
 	h.factory.SetOnLtUpdated(callback)

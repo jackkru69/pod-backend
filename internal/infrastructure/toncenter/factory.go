@@ -17,9 +17,9 @@ type EventSourceFactory struct {
 	httpClient      *Client
 	currentSource   EventSource
 	sourceMu        sync.RWMutex
-	onFallback      func()          // Called when fallback occurs
-	fallbackHandler func()          // Internal fallback trigger
-	onLtUpdated     func(lt string) // Callback when lt is updated
+	onFallback      func()                      // Called when fallback occurs
+	fallbackHandler func()                      // Internal fallback trigger
+	onLtUpdated     func(lt string, hash string) // Callback when lt and hash are updated
 }
 
 // FactoryConfig holds configuration for EventSourceFactory.
@@ -259,9 +259,9 @@ func (f *EventSourceFactory) SwitchToHTTP(ctx context.Context, handler EventHand
 	poller.Start(ctx)
 }
 
-// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+// SetOnLtUpdated sets a callback that is called when last_processed_lt and hash are updated.
 // Used to persist the state to database after processing transactions.
-func (f *EventSourceFactory) SetOnLtUpdated(callback func(lt string)) {
+func (f *EventSourceFactory) SetOnLtUpdated(callback func(lt string, hash string)) {
 	f.sourceMu.Lock()
 	defer f.sourceMu.Unlock()
 

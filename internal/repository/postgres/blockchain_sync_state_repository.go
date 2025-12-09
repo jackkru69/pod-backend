@@ -35,6 +35,7 @@ func (r *BlockchainSyncStateRepository) Get(ctx context.Context) (*entity.Blockc
 			"updated_at",
 			"COALESCE(event_source_type::text, 'http')",
 			"COALESCE(last_processed_lt, '0')",
+			"COALESCE(last_processed_hash, '')",
 			"COALESCE(websocket_connected, false)",
 			"COALESCE(fallback_count, 0)",
 			"last_fallback_at",
@@ -55,6 +56,7 @@ func (r *BlockchainSyncStateRepository) Get(ctx context.Context) (*entity.Blockc
 		&state.UpdatedAt,
 		&state.EventSourceType,
 		&state.LastProcessedLt,
+		&state.LastProcessedHash,
 		&state.WebSocketConnected,
 		&state.FallbackCount,
 		&state.LastFallbackAt,
@@ -173,12 +175,13 @@ func (r *BlockchainSyncStateRepository) SetEventSourceType(ctx context.Context, 
 	return nil
 }
 
-// UpdateLastProcessedLt atomically updates the last processed logical time (T147).
-func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Context, lt string) error {
+// UpdateLastProcessedLt atomically updates the last processed logical time and hash (T147).
+func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Context, lt string, hash string) error {
 	now := time.Now()
 	sql, args, err := r.pg.Builder.
 		Update("blockchain_sync_state").
 		Set("last_processed_lt", lt).
+		Set("last_processed_hash", hash).
 		Set("last_poll_timestamp", now).
 		Where("id = ?", 1).
 		ToSql()
@@ -194,24 +197,25 @@ func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Contex
 	return nil
 }
 
-// GetLastProcessedLt returns the last processed logical time (T147).
-func (r *BlockchainSyncStateRepository) GetLastProcessedLt(ctx context.Context) (string, error) {
+// GetLastProcessedLt returns the last processed logical time and hash (T147).
+func (r *BlockchainSyncStateRepository) GetLastProcessedLt(ctx context.Context) (string, string, error) {
 	sql, args, err := r.pg.Builder.
-		Select("COALESCE(last_processed_lt, '0')").
+		Select("COALESCE(last_processed_lt, '0')", "COALESCE(last_processed_hash, '')").
 		From("blockchain_sync_state").
 		Where("id = ?", 1).
 		ToSql()
 	if err != nil {
-		return "", fmt.Errorf("build query: %w", err)
+		return "", "", fmt.Errorf("build query: %w", err)
 	}
 
 	var lt string
-	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&lt)
+	var hash string
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&lt, &hash)
 	if err != nil {
-		return "", fmt.Errorf("execute query: %w", err)
+		return "", "", fmt.Errorf("execute query: %w", err)
 	}
 
-	return lt, nil
+	return lt, hash, nil
 }
 
 // RecordFallback increments the fallback counter and sets the timestamp (T147).

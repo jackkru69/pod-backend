@@ -17,6 +17,7 @@ type BlockchainSyncState struct {
 	// WebSocket event streaming fields (Phase 10)
 	EventSourceType    string     `json:"event_source_type"`   // "websocket" or "http"
 	LastProcessedLt    string     `json:"last_processed_lt"`   // Last processed logical time (lt) for TON
+	LastProcessedHash  string     `json:"last_processed_hash"` // Last processed transaction hash (base64) - required with lt for TON API pagination
 	WebSocketConnected bool       `json:"websocket_connected"` // Whether WebSocket is currently connected
 	FallbackCount      int        `json:"fallback_count"`      // Number of fallback events
 	LastFallbackAt     *time.Time `json:"last_fallback_at"`    // When last fallback occurred

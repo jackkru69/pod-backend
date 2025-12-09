@@ -17,7 +17,7 @@ import (
 const (
 	MessageTypeReservationCreated  = "reservation_created"
 	MessageTypeReservationReleased = "reservation_released"
-	MessageTypeGameStateUpdate          = "game_state_update"
+	MessageTypeGameStateUpdate     = "game_state_update"
 
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
