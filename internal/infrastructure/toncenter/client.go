@@ -125,8 +125,8 @@ func (c *Client) doGetTransactions(ctx context.Context, lt string, hash string, 
 
 	// Add lt and hash parameters for pagination (must be used together)
 	// This tells the API to start from this specific transaction
-	if lt != "" && lt != "0" && hash != "" {
-		url += fmt.Sprintf("&lt=%s&hash=%s", lt, hash)
+	if lt != "" && lt != "0" {
+		url += fmt.Sprintf("&lt=%s", lt)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
