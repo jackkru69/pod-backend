@@ -62,10 +62,12 @@ func NewWebSocketSubscriber(cfg WebSocketSubscriberConfig, log logger.Interface)
 
 // HandleTransaction implements EventHandler interface to process transactions.
 // Updates last processed lt and forwards to registered handler.
+// BUG FIX: Use compareLt() for proper big.Int comparison instead of string comparison.
+// String comparison is incorrect: "9" > "10" returns true (ASCII comparison).
 func (s *WebSocketSubscriber) HandleTransaction(ctx context.Context, tx Transaction) error {
-	// Update last processed lt
+	// Update last processed lt using proper numeric comparison
 	s.ltMu.Lock()
-	if tx.Lt() > s.lastProcessedLt {
+	if compareLt(tx.Lt(), s.lastProcessedLt) {
 		s.lastProcessedLt = tx.Lt()
 	}
 	s.ltMu.Unlock()

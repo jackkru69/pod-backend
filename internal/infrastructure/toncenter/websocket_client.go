@@ -40,6 +40,7 @@ type WebSocketClient struct {
 	isConnected      atomic.Bool
 	subscribed       atomic.Bool
 	stopped          atomic.Bool // Guard against double Stop()
+	disconnecting    atomic.Bool // Guard against concurrent disconnect (deadlock fix)
 	subscriptionID   string
 	handler          EventHandler
 	stopCh           chan struct{}
@@ -339,7 +340,16 @@ func (c *WebSocketClient) pingLoop(ctx context.Context) {
 }
 
 // handleDisconnect handles connection loss and triggers reconnection (T141).
+// Uses atomic flag to prevent concurrent disconnect attempts which could cause deadlock.
 func (c *WebSocketClient) handleDisconnect() {
+	// Only allow one goroutine to handle disconnect at a time
+	// This prevents deadlock when both readLoop and pingLoop try to disconnect simultaneously
+	if !c.disconnecting.CompareAndSwap(false, true) {
+		c.logger.Debug("Disconnect already in progress, skipping")
+		return
+	}
+	defer c.disconnecting.Store(false)
+
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 

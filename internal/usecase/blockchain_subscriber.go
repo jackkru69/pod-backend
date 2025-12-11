@@ -13,9 +13,9 @@ import (
 
 // Retry configuration constants
 const (
-	maxRetries       = 3
-	initialBackoff   = 100 * time.Millisecond
-	maxBackoff       = 2 * time.Second
+	maxRetries        = 3
+	initialBackoff    = 100 * time.Millisecond
+	maxBackoff        = 2 * time.Second
 	backoffMultiplier = 2.0
 )
 
@@ -221,14 +221,14 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 		if attempt > 0 {
 			uc.logger.Warn("Retrying %s event for game_id=%d (attempt %d/%d, backoff=%v)",
 				event.EventType, event.GameID, attempt, maxRetries, backoff)
-			
+
 			// Wait with backoff before retry
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(backoff):
 			}
-			
+
 			// Increase backoff for next retry (exponential with cap)
 			backoff = time.Duration(float64(backoff) * backoffMultiplier)
 			if backoff > maxBackoff {
@@ -245,7 +245,7 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 			return nil
 		}
 		lastErr = err
-		
+
 		// Check if context is cancelled
 		if ctx.Err() != nil {
 			return ctx.Err()

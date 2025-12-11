@@ -27,12 +27,12 @@ const (
 type GameEventType string
 
 const (
-	GameEventTypeInitialized       GameEventType = "game_initialized"
-	GameEventTypeStarted           GameEventType = "game_started"
-	GameEventTypeFinished          GameEventType = "game_finished"
-	GameEventTypeCancelled         GameEventType = "game_cancelled"
-	GameEventTypeDraw              GameEventType = "draw"
-	GameEventTypeSecretOpened      GameEventType = "secret_opened"
+	GameEventTypeInitialized         GameEventType = "game_initialized"
+	GameEventTypeStarted             GameEventType = "game_started"
+	GameEventTypeFinished            GameEventType = "game_finished"
+	GameEventTypeCancelled           GameEventType = "game_cancelled"
+	GameEventTypeDraw                GameEventType = "draw"
+	GameEventTypeSecretOpened        GameEventType = "secret_opened"
 	GameEventTypeInsufficientBalance GameEventType = "insufficient_balance"
 )
 
@@ -147,21 +147,36 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdate(ctx context.Context, game *e
 	return uc.BroadcastGameUpdateWithEvent(ctx, game, "")
 }
 
-// BroadcastGameUpdateWithEvent sends a game update with event type to all subscribers
+// BroadcastGameUpdateWithEvent sends a game update with event type to all subscribers.
+// RACE CONDITION FIX: Deep copy subscriber maps while holding lock to prevent
+// concurrent modification during iteration.
 func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context, game *entity.Game, eventType GameEventType) error {
+	// Deep copy subscribers while holding lock to prevent race condition
 	uc.mu.RLock()
-	gameSubscribers := uc.gameSubscribers[game.GameID]
-	globalSubscribers := uc.gameSubscribers[GlobalGameID]
-	uc.mu.RUnlock()
-
-	// Merge subscribers: game-specific + global
 	allSubscribers := make(map[string]*subscriber)
-	for k, v := range gameSubscribers {
-		allSubscribers[k] = v
+	
+	// Copy game-specific subscribers
+	if gameSubscribers := uc.gameSubscribers[game.GameID]; gameSubscribers != nil {
+		for k, v := range gameSubscribers {
+			allSubscribers[k] = v
+		}
 	}
-	for k, v := range globalSubscribers {
-		allSubscribers[k] = v
+	
+	// Copy global subscribers
+	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
+		for k, v := range globalSubscribers {
+			allSubscribers[k] = v
+		}
 	}
+	
+	// Also capture which clients are global for later cleanup
+	globalClientIDs := make(map[string]bool)
+	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
+		for k := range globalSubscribers {
+			globalClientIDs[k] = true
+		}
+	}
+	uc.mu.RUnlock()
 
 	if len(allSubscribers) == 0 {
 		log.Debug().
@@ -201,7 +216,7 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 				Str("client_id", clientID).
 				Msg("Failed to set write deadline")
 			// Check if this is a global or game-specific subscriber
-			if _, isGlobal := globalSubscribers[clientID]; isGlobal {
+			if globalClientIDs[clientID] {
 				failedGlobalClients = append(failedGlobalClients, clientID)
 			} else {
 				failedGameClients = append(failedGameClients, clientID)
@@ -216,7 +231,7 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 				Int64("game_id", game.GameID).
 				Str("client_id", clientID).
 				Msg("Failed to send game update to client")
-			if _, isGlobal := globalSubscribers[clientID]; isGlobal {
+			if globalClientIDs[clientID] {
 				failedGlobalClients = append(failedGlobalClients, clientID)
 			} else {
 				failedGameClients = append(failedGameClients, clientID)
@@ -272,8 +287,8 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 	log.Info().
 		Int64("game_id", game.GameID).
 		Int("status", game.Status).
-		Int("game_subscribers", len(gameSubscribers)).
-		Int("global_subscribers", len(globalSubscribers)).
+		Int("total_subscribers", len(allSubscribers)).
+		Int("global_subscribers", len(globalClientIDs)).
 		Int("failed", totalFailed).
 		Msg("Game update broadcast completed")
 
@@ -353,21 +368,35 @@ func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context
 	return uc.broadcastEvent(ctx, gameID, event)
 }
 
-// broadcastEvent sends an arbitrary event to all subscribers of a game AND global subscribers
+// broadcastEvent sends an arbitrary event to all subscribers of a game AND global subscribers.
+// RACE CONDITION FIX: Deep copy subscriber maps while holding lock.
 func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64, event interface{}) error {
+	// Deep copy subscribers while holding lock to prevent race condition
 	uc.mu.RLock()
-	gameSubscribers := uc.gameSubscribers[gameID]
-	globalSubscribers := uc.gameSubscribers[GlobalGameID]
-	uc.mu.RUnlock()
-
-	// Merge subscribers: game-specific + global
 	allSubscribers := make(map[string]*subscriber)
-	for k, v := range gameSubscribers {
-		allSubscribers[k] = v
+	
+	// Copy game-specific subscribers
+	if gameSubscribers := uc.gameSubscribers[gameID]; gameSubscribers != nil {
+		for k, v := range gameSubscribers {
+			allSubscribers[k] = v
+		}
 	}
-	for k, v := range globalSubscribers {
-		allSubscribers[k] = v
+	
+	// Copy global subscribers
+	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
+		for k, v := range globalSubscribers {
+			allSubscribers[k] = v
+		}
 	}
+	
+	// Track which clients are global for later cleanup
+	globalClientIDs := make(map[string]bool)
+	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
+		for k := range globalSubscribers {
+			globalClientIDs[k] = true
+		}
+	}
+	uc.mu.RUnlock()
 
 	if len(allSubscribers) == 0 {
 		log.Debug().
@@ -399,7 +428,7 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 				Int64("game_id", gameID).
 				Str("client_id", clientID).
 				Msg("Failed to set write deadline")
-			if _, isGlobal := globalSubscribers[clientID]; isGlobal {
+			if globalClientIDs[clientID] {
 				failedGlobalClients = append(failedGlobalClients, clientID)
 			} else {
 				failedGameClients = append(failedGameClients, clientID)
@@ -414,7 +443,7 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 				Int64("game_id", gameID).
 				Str("client_id", clientID).
 				Msg("Failed to send event to client")
-			if _, isGlobal := globalSubscribers[clientID]; isGlobal {
+			if globalClientIDs[clientID] {
 				failedGlobalClients = append(failedGlobalClients, clientID)
 			} else {
 				failedGameClients = append(failedGameClients, clientID)
@@ -469,8 +498,8 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 
 	log.Debug().
 		Int64("game_id", gameID).
-		Int("game_subscribers", len(gameSubscribers)).
-		Int("global_subscribers", len(globalSubscribers)).
+		Int("total_subscribers", len(allSubscribers)).
+		Int("global_subscribers", len(globalClientIDs)).
 		Int("failed", totalFailed).
 		Msg("Event broadcast completed")
 

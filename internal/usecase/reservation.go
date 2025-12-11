@@ -36,6 +36,7 @@ type ReservationUseCase struct {
 
 	// Cleanup control
 	stopCleanup chan struct{}
+	stopOnce    sync.Once // Prevents double-close panic
 }
 
 // ReservationConfig holds configuration for the reservation use case
@@ -311,26 +312,44 @@ func (uc *ReservationUseCase) StartCleanupLoop(ctx context.Context) {
 		Msg("Reservation cleanup loop started")
 }
 
-// StopCleanupLoop stops the background cleanup goroutine
+// StopCleanupLoop stops the background cleanup goroutine.
+// Safe to call multiple times - uses sync.Once to prevent panic on double close.
 func (uc *ReservationUseCase) StopCleanupLoop() {
-	close(uc.stopCleanup)
+	uc.stopOnce.Do(func() {
+		close(uc.stopCleanup)
+		log.Info().Msg("Reservation cleanup loop stop signal sent")
+	})
 }
 
-// CleanupExpired removes expired reservations and broadcasts updates
-// Exported for testing purposes
+// CleanupExpired removes expired reservations and broadcasts updates.
+// Also cleans up old non-active reservations to prevent memory leaks.
+// Exported for testing purposes.
 func (uc *ReservationUseCase) CleanupExpired(ctx context.Context) {
 	uc.mu.Lock()
 
 	var expiredGames []int64
 	var expiredReservations []*entity.GameReservation
+	var staleGameIDs []int64
 
 	for gameID, reservation := range uc.reservations {
 		if reservation.Status == entity.ReservationStatusActive && reservation.IsExpired() {
+			// Mark as expired and collect for broadcast
 			reservation.Status = entity.ReservationStatusExpired
 			uc.removeFromWalletIndex(reservation.WalletAddress, gameID)
 			expiredGames = append(expiredGames, gameID)
 			expiredReservations = append(expiredReservations, reservation)
 		}
+		
+		// Collect non-active reservations for cleanup (memory leak fix)
+		// Keep expired reservations for a short time for debugging, then remove
+		if !reservation.IsActive() {
+			staleGameIDs = append(staleGameIDs, gameID)
+		}
+	}
+	
+	// Remove stale reservations from memory to prevent leak
+	for _, gameID := range staleGameIDs {
+		delete(uc.reservations, gameID)
 	}
 
 	uc.mu.Unlock()
