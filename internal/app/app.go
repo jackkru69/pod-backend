@@ -25,6 +25,7 @@ import (
 	"pod-backend/pkg/httpserver"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
+	"strconv"
 )
 
 // Prometheus metrics (T059, T121)
@@ -74,6 +75,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	userRepo := repopg.NewUserRepository(pg)
 	eventRepo := repopg.NewGameEventRepository(pg)
 	syncStateRepo := repopg.NewBlockchainSyncStateRepository(pg)
+	dlqRepo := repopg.NewDeadLetterQueueRepository(pg) // Dead Letter Queue repository (Issue #6)
 
 	// Initialize transaction manager for atomic database operations
 	txManager := postgres.NewTxManager(pg.Pool)
@@ -82,6 +84,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
 	gameBroadcastUC := usecase.NewGameBroadcastUseCase()
 	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
+	dlqUseCase := usecase.NewDeadLetterQueueUseCase(dlqRepo, l) // Dead Letter Queue use case (Issue #6)
 
 	// Initialize reservation use case
 	reservationCfg := usecase.ReservationConfig{
@@ -113,7 +116,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Initialize blockchain persistence use case (T093)
 	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
-	gamePersistenceUC.SetTxManager(txManager) // Enable transactional operations for atomic updates
+	gamePersistenceUC.SetTxManager(txManager)              // Enable transactional operations for atomic updates
 	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC) // Wire WebSocket broadcasting
 
 	// Initialize blockchain metrics (T097)
@@ -146,6 +149,13 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Wire metrics into blockchain subscriber (T097)
 	blockchainHandler.SetMetrics(blockchainMetrics)
+
+	// Configure retry parameters from config (Issue #9)
+	retryConfig := parseRetryConfig(cfg, l)
+	blockchainHandler.SetRetryConfig(retryConfig)
+
+	// Wire Dead Letter Queue for failed transaction storage (Issue #6)
+	blockchainHandler.SetDeadLetterQueue(dlqUseCase)
 
 	// Create router dependencies
 	routerDeps := http.RouterDeps{
@@ -255,4 +265,47 @@ func updateDatabaseMetrics(pg *postgres.Postgres) {
 			Int32("max", stats.MaxConns()).
 			Msg("Updated database connection pool metrics")
 	}
+}
+
+// parseRetryConfig parses retry configuration from config file (Issue #9).
+// Falls back to defaults if parsing fails.
+func parseRetryConfig(cfg *config.Config, l logger.Interface) usecase.RetryConfig {
+	retryConfig := usecase.DefaultRetryConfig()
+
+	// Override max retries if configured
+	if cfg.Retry.MaxRetries > 0 {
+		retryConfig.MaxRetries = cfg.Retry.MaxRetries
+	}
+
+	// Parse initial backoff duration
+	if cfg.Retry.InitialBackoff != "" {
+		if d, err := time.ParseDuration(cfg.Retry.InitialBackoff); err == nil {
+			retryConfig.InitialBackoff = d
+		} else {
+			l.Warn("Failed to parse RETRY_INITIAL_BACKOFF '%s', using default: %v",
+				cfg.Retry.InitialBackoff, err)
+		}
+	}
+
+	// Parse max backoff duration
+	if cfg.Retry.MaxBackoff != "" {
+		if d, err := time.ParseDuration(cfg.Retry.MaxBackoff); err == nil {
+			retryConfig.MaxBackoff = d
+		} else {
+			l.Warn("Failed to parse RETRY_MAX_BACKOFF '%s', using default: %v",
+				cfg.Retry.MaxBackoff, err)
+		}
+	}
+
+	// Parse backoff multiplier
+	if cfg.Retry.BackoffMultiplier != "" {
+		if m, err := strconv.ParseFloat(cfg.Retry.BackoffMultiplier, 64); err == nil && m > 1.0 {
+			retryConfig.BackoffMultiplier = m
+		} else {
+			l.Warn("Failed to parse RETRY_BACKOFF_MULTIPLIER '%s', using default: %v",
+				cfg.Retry.BackoffMultiplier, err)
+		}
+	}
+
+	return retryConfig
 }

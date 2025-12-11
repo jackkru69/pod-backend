@@ -20,6 +20,8 @@ type (
 		Swagger     Swagger
 		Reservation Reservation
 		GameBackend GameBackend
+		Retry       Retry
+		Tracing     Tracing
 	}
 
 	// App -.
@@ -101,6 +103,20 @@ type (
 		// Blockchain Polling Configuration
 		MinPollInterval string `env:"MIN_POLL_INTERVAL" envDefault:"5s"`  // Minimum polling interval when active
 		MaxPollInterval string `env:"MAX_POLL_INTERVAL" envDefault:"30s"` // Maximum polling interval when idle
+	}
+
+	// Retry - Retry/backoff configuration for event processing
+	Retry struct {
+		MaxRetries        int    `env:"RETRY_MAX_RETRIES" envDefault:"3"`          // Maximum retry attempts
+		InitialBackoff    string `env:"RETRY_INITIAL_BACKOFF" envDefault:"100ms"`  // Initial backoff duration
+		MaxBackoff        string `env:"RETRY_MAX_BACKOFF" envDefault:"2s"`         // Maximum backoff duration
+		BackoffMultiplier string `env:"RETRY_BACKOFF_MULTIPLIER" envDefault:"2.0"` // Backoff multiplier
+	}
+
+	// Tracing - OpenTelemetry tracing configuration (Issue #10)
+	Tracing struct {
+		Enabled      bool   `env:"TRACING_ENABLED" envDefault:"false"`            // Enable distributed tracing
+		OTLPEndpoint string `env:"TRACING_OTLP_ENDPOINT" envDefault:"localhost:4318"` // OTLP collector endpoint
 	}
 )
 

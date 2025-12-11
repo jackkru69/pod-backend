@@ -11,13 +11,32 @@ import (
 	"pod-backend/pkg/logger"
 )
 
-// Retry configuration constants
+// Default retry configuration constants (used when not configured via config)
 const (
-	maxRetries        = 3
-	initialBackoff    = 100 * time.Millisecond
-	maxBackoff        = 2 * time.Second
-	backoffMultiplier = 2.0
+	defaultMaxRetries        = 3
+	defaultInitialBackoff    = 100 * time.Millisecond
+	defaultMaxBackoff        = 2 * time.Second
+	defaultBackoffMultiplier = 2.0
 )
+
+// RetryConfig holds retry/backoff configuration parameters.
+// Can be set via SetRetryConfig or uses defaults.
+type RetryConfig struct {
+	MaxRetries        int
+	InitialBackoff    time.Duration
+	MaxBackoff        time.Duration
+	BackoffMultiplier float64
+}
+
+// DefaultRetryConfig returns the default retry configuration.
+func DefaultRetryConfig() RetryConfig {
+	return RetryConfig{
+		MaxRetries:        defaultMaxRetries,
+		InitialBackoff:    defaultInitialBackoff,
+		MaxBackoff:        defaultMaxBackoff,
+		BackoffMultiplier: defaultBackoffMultiplier,
+	}
+}
 
 // BlockchainSubscriberUseCase subscribes to TON Center blockchain events and routes them
 // to GamePersistenceUseCase for processing.
@@ -25,11 +44,14 @@ const (
 // FR-019 (resilient polling).
 // T097: Integrated with Prometheus metrics for monitoring.
 // T152: Updated to use EventSource abstraction for WebSocket/HTTP flexibility.
+// Issue #6: Integrated with DeadLetterQueueUseCase for failed transaction storage.
 type BlockchainSubscriberUseCase struct {
 	eventSource        toncenter.EventSource
 	persistenceUseCase *GamePersistenceUseCase
+	dlqUseCase         *DeadLetterQueueUseCase    // Optional DLQ for failed transactions (Issue #6)
 	logger             logger.Interface
 	metrics            *metrics.BlockchainMetrics // Optional metrics (T097)
+	retryConfig        RetryConfig                // Retry configuration (Issue #9)
 }
 
 // NewBlockchainSubscriberUseCase creates a new blockchain subscriber use case.
@@ -43,7 +65,8 @@ func NewBlockchainSubscriberUseCase(
 		eventSource:        eventSource,
 		persistenceUseCase: persistenceUseCase,
 		logger:             logger,
-		metrics:            nil, // Set via SetMetrics
+		metrics:            nil,                  // Set via SetMetrics
+		retryConfig:        DefaultRetryConfig(), // Use defaults, can override via SetRetryConfig
 	}
 
 	// Register this use case as the event handler
@@ -64,7 +87,8 @@ func NewBlockchainSubscriberUseCaseWithPoller(
 	uc := &BlockchainSubscriberUseCase{
 		persistenceUseCase: persistenceUseCase,
 		logger:             logger,
-		metrics:            nil, // Set via SetMetrics
+		metrics:            nil,                  // Set via SetMetrics
+		retryConfig:        DefaultRetryConfig(), // Use defaults
 	}
 
 	// Create poller with this use case as the event handler
@@ -78,6 +102,31 @@ func NewBlockchainSubscriberUseCaseWithPoller(
 // This is optional - if not set, metrics collection is disabled.
 func (uc *BlockchainSubscriberUseCase) SetMetrics(m *metrics.BlockchainMetrics) {
 	uc.metrics = m
+}
+
+// SetRetryConfig sets custom retry configuration (Issue #9).
+// This allows runtime configuration of retry parameters without code changes.
+func (uc *BlockchainSubscriberUseCase) SetRetryConfig(cfg RetryConfig) {
+	// Validate and apply sensible defaults for invalid values
+	if cfg.MaxRetries < 0 {
+		cfg.MaxRetries = defaultMaxRetries
+	}
+	if cfg.InitialBackoff <= 0 {
+		cfg.InitialBackoff = defaultInitialBackoff
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = defaultMaxBackoff
+	}
+	if cfg.BackoffMultiplier <= 1.0 {
+		cfg.BackoffMultiplier = defaultBackoffMultiplier
+	}
+	uc.retryConfig = cfg
+}
+
+// SetDeadLetterQueue sets the DLQ use case for failed transaction storage (Issue #6).
+// This is optional - if not set, failed transactions are only logged.
+func (uc *BlockchainSubscriberUseCase) SetDeadLetterQueue(dlq *DeadLetterQueueUseCase) {
+	uc.dlqUseCase = dlq
 }
 
 // HandleTransaction implements toncenter.EventHandler interface.
@@ -113,10 +162,18 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 	// Route event to appropriate handler with retry logic
 	if err := uc.routeEventWithRetry(ctx, event); err != nil {
 		uc.logger.Error("Failed to persist %s event for game_id=%d after %d retries: %v",
-			event.EventType, event.GameID, maxRetries, err)
+			event.EventType, event.GameID, uc.retryConfig.MaxRetries, err)
 		if uc.metrics != nil {
 			uc.metrics.RecordEventFailed(event.EventType, "persistence_error")
 		}
+		
+		// Store in DLQ for later retry (Issue #6)
+		if uc.dlqUseCase != nil {
+			if dlqErr := uc.dlqUseCase.StoreFailedTransaction(ctx, tx, err, entity.DLQErrorTypePersistence); dlqErr != nil {
+				uc.logger.Error("Failed to store transaction in DLQ: tx=%s, error=%v", tx.Hash(), dlqErr)
+			}
+		}
+		
 		return fmt.Errorf("failed to route event: %w", err)
 	}
 
@@ -212,15 +269,16 @@ func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction
 }
 
 // routeEventWithRetry routes a parsed GameEvent with retry logic and exponential backoff.
-// Retries transient failures (database connectivity, etc.) up to maxRetries times.
+// Retries transient failures (database connectivity, etc.) up to retryConfig.MaxRetries times.
+// Uses configurable backoff parameters from retryConfig (Issue #9).
 func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, event *entity.GameEvent) error {
 	var lastErr error
-	backoff := initialBackoff
+	backoff := uc.retryConfig.InitialBackoff
 
-	for attempt := 0; attempt <= maxRetries; attempt++ {
+	for attempt := 0; attempt <= uc.retryConfig.MaxRetries; attempt++ {
 		if attempt > 0 {
 			uc.logger.Warn("Retrying %s event for game_id=%d (attempt %d/%d, backoff=%v)",
-				event.EventType, event.GameID, attempt, maxRetries, backoff)
+				event.EventType, event.GameID, attempt, uc.retryConfig.MaxRetries, backoff)
 
 			// Wait with backoff before retry
 			select {
@@ -230,9 +288,9 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 			}
 
 			// Increase backoff for next retry (exponential with cap)
-			backoff = time.Duration(float64(backoff) * backoffMultiplier)
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+			backoff = time.Duration(float64(backoff) * uc.retryConfig.BackoffMultiplier)
+			if backoff > uc.retryConfig.MaxBackoff {
+				backoff = uc.retryConfig.MaxBackoff
 			}
 		}
 
@@ -252,13 +310,13 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 		}
 
 		// Log retry attempt
-		if attempt < maxRetries {
+		if attempt < uc.retryConfig.MaxRetries {
 			uc.logger.Warn("Attempt %d failed for %s event game_id=%d: %v",
 				attempt+1, event.EventType, event.GameID, err)
 		}
 	}
 
-	return fmt.Errorf("all %d retry attempts failed: %w", maxRetries, lastErr)
+	return fmt.Errorf("all %d retry attempts failed: %w", uc.retryConfig.MaxRetries, lastErr)
 }
 
 // routeEvent routes a parsed GameEvent to the appropriate handler in GamePersistenceUseCase.

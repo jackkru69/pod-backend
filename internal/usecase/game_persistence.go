@@ -19,8 +19,8 @@ type GamePersistenceUseCase struct {
 	gameRepo    repository.GameRepository
 	eventRepo   repository.GameEventRepository
 	userRepo    repository.UserRepository
-	txManager   repository.TxManager      // Optional: for transactional operations
-	broadcastUC *GameBroadcastUseCase     // Optional: nil when WebSocket not enabled
+	txManager   repository.TxManager  // Optional: for transactional operations
+	broadcastUC *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.

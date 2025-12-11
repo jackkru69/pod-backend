@@ -196,3 +196,18 @@ func (h *TONEventHandler) SetOnLtUpdated(callback func(lt string)) {
 	// Also set callback on the factory/event source
 	h.factory.SetOnLtUpdated(callback)
 }
+
+// SetRetryConfig sets the retry configuration for blockchain event processing (Issue #9).
+// Allows runtime configuration of retry parameters without code changes.
+func (h *TONEventHandler) SetRetryConfig(cfg usecase.RetryConfig) {
+	h.subscriberUC.SetRetryConfig(cfg)
+	h.logger.Info("Retry config set: maxRetries=%d, initialBackoff=%v, maxBackoff=%v, multiplier=%.1f",
+		cfg.MaxRetries, cfg.InitialBackoff, cfg.MaxBackoff, cfg.BackoffMultiplier)
+}
+
+// SetDeadLetterQueue sets the DLQ use case for failed transaction storage (Issue #6).
+// Enables storing failed transactions for later retry and analysis.
+func (h *TONEventHandler) SetDeadLetterQueue(dlq *usecase.DeadLetterQueueUseCase) {
+	h.subscriberUC.SetDeadLetterQueue(dlq)
+	h.logger.Info("Dead Letter Queue enabled for failed transaction storage")
+}
