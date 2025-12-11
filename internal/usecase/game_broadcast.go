@@ -23,6 +23,19 @@ const (
 	GlobalGameID = int64(0)
 )
 
+// GameEventType represents the type of blockchain event that triggered the update
+type GameEventType string
+
+const (
+	GameEventTypeInitialized       GameEventType = "game_initialized"
+	GameEventTypeStarted           GameEventType = "game_started"
+	GameEventTypeFinished          GameEventType = "game_finished"
+	GameEventTypeCancelled         GameEventType = "game_cancelled"
+	GameEventTypeDraw              GameEventType = "draw"
+	GameEventTypeSecretOpened      GameEventType = "secret_opened"
+	GameEventTypeInsufficientBalance GameEventType = "insufficient_balance"
+)
+
 // ReservationCreatedEvent is sent when a game is reserved
 type ReservationCreatedEvent struct {
 	Type       string `json:"type"`
@@ -129,7 +142,13 @@ func (uc *GameBroadcastUseCase) Unsubscribe(ctx context.Context, gameID int64, c
 }
 
 // BroadcastGameUpdate sends a game update to all subscribers of that game AND global subscribers
+// Deprecated: Use BroadcastGameUpdateWithEvent for new code
 func (uc *GameBroadcastUseCase) BroadcastGameUpdate(ctx context.Context, game *entity.Game) error {
+	return uc.BroadcastGameUpdateWithEvent(ctx, game, "")
+}
+
+// BroadcastGameUpdateWithEvent sends a game update with event type to all subscribers
+func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context, game *entity.Game, eventType GameEventType) error {
 	uc.mu.RLock()
 	gameSubscribers := uc.gameSubscribers[game.GameID]
 	globalSubscribers := uc.gameSubscribers[GlobalGameID]
@@ -151,11 +170,15 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdate(ctx context.Context, game *e
 		return nil
 	}
 
-	// Create game update message matching OpenAPI spec
-	message, err := json.Marshal(map[string]interface{}{
+	// Create game update message matching OpenAPI spec with event_type
+	msgData := map[string]interface{}{
 		"type": MessageTypeGameStateUpdate,
 		"data": game,
-	})
+	}
+	if eventType != "" {
+		msgData["event_type"] = string(eventType)
+	}
+	message, err := json.Marshal(msgData)
 	if err != nil {
 		log.Error().
 			Err(err).

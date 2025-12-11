@@ -3,6 +3,7 @@ package toncenter
 import (
 	"context"
 	"math/big"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -163,30 +164,51 @@ func (p *Poller) poll(ctx context.Context) {
 
 	p.logger.Info("Found %d new transactions (filtered %d already processed)", len(newTxs), len(txs)-len(newTxs))
 
-	// Process transactions
-	var maxLt string
+	// CRITICAL: Sort transactions by lt ASC (oldest first) to ensure correct event ordering.
+	// TON API returns transactions newest-first, but we need to process GameInitialized
+	// before GameStarted, GameFinished, etc. for the same game_id.
+	sort.Slice(newTxs, func(i, j int) bool {
+		n1 := new(big.Int)
+		n2 := new(big.Int)
+		n1.SetString(newTxs[i].Lt(), 10)
+		n2.SetString(newTxs[j].Lt(), 10)
+		return n1.Cmp(n2) < 0 // ASC order (oldest first)
+	})
+
+	// Process transactions in chronological order (oldest first)
+	// Track the last SUCCESSFULLY processed lt to ensure failed transactions are retried
+	var lastSuccessfulLt string
+	var hasFailure bool
 	for _, tx := range newTxs {
 		if err := p.handler.HandleTransaction(ctx, tx); err != nil {
 			p.logger.Error("Failed to handle transaction hash=%s: %v", tx.Hash(), err)
-			continue
+			hasFailure = true
+			// CRITICAL: Stop processing further transactions if one fails
+			// This ensures we don't skip ahead and lose the failed transaction
+			// The failed tx will be retried on next poll cycle
+			break
 		}
 
-		// Update last processed logical time (lt)
-		// TON uses lt (logical time) for transaction ordering, higher lt means newer
-		// Use numeric comparison instead of string comparison
+		// Update last SUCCESSFULLY processed logical time (lt)
+		// Only update after successful handling to ensure failed txs are retried
 		if compareLt(tx.Lt(), p.lastProcessedLt) {
 			p.lastProcessedLt = tx.Lt()
-			maxLt = tx.Lt()
+			lastSuccessfulLt = tx.Lt()
 		}
 	}
 
-	// Persist updated lt to database via callback
-	if maxLt != "" && p.onLtUpdated != nil {
-		p.onLtUpdated(maxLt)
+	// Persist updated lt to database via callback (only if we made progress)
+	if lastSuccessfulLt != "" && p.onLtUpdated != nil {
+		p.onLtUpdated(lastSuccessfulLt)
 	}
 
-	// Speed up when activity detected
-	p.adjustInterval(true)
+	// Slow down if we had failures (to avoid hammering on stuck transactions)
+	if hasFailure {
+		p.adjustInterval(false)
+	} else {
+		// Speed up when all transactions processed successfully
+		p.adjustInterval(true)
+	}
 }
 
 // handleError implements exponential backoff for TON Center API errors (T103, FR-019).

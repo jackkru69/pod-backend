@@ -112,8 +112,8 @@ func serializeEventData(event *entity.GameEvent) error {
 }
 
 // broadcastGameUpdate triggers WebSocket broadcast if broadcast use case is configured (T093).
-// Fetches the latest game state and broadcasts to all subscribers.
-func (uc *GamePersistenceUseCase) broadcastGameUpdate(ctx context.Context, gameID int64) {
+// Fetches the latest game state and broadcasts to all subscribers with event type.
+func (uc *GamePersistenceUseCase) broadcastGameUpdate(ctx context.Context, gameID int64, eventType GameEventType) {
 	if uc.broadcastUC == nil {
 		// Broadcasting not enabled
 		return
@@ -127,8 +127,8 @@ func (uc *GamePersistenceUseCase) broadcastGameUpdate(ctx context.Context, gameI
 		return
 	}
 
-	// Trigger broadcast (errors are logged inside BroadcastGameUpdate)
-	_ = uc.broadcastUC.BroadcastGameUpdate(ctx, game)
+	// Trigger broadcast with event type (errors are logged inside BroadcastGameUpdateWithEvent)
+	_ = uc.broadcastUC.BroadcastGameUpdateWithEvent(ctx, game, eventType)
 }
 
 // HandleGameInitialized processes GameInitializedNotify event.
@@ -180,30 +180,38 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		CreatedAt:        event.Timestamp,
 	}
 
-	// Persist game FIRST (FR-001) - game_events has FK to games
-	// Use CreateOrIgnore for idempotent event processing (duplicate events are ignored)
-	created, err := uc.gameRepo.CreateOrIgnore(ctx, game)
+	// CRITICAL: Persist game FIRST (FK constraint requirement)
+	// game_events table has FK to games.game_id, so game must exist before event
+	// Use CreateOrIgnore for idempotent event processing
+	_, err = uc.gameRepo.CreateOrIgnore(ctx, game)
 	if err != nil {
 		return fmt.Errorf("failed to create game: %w", err)
 	}
 
-	// If game already existed, skip event persistence (already processed)
-	if !created {
-		return nil // Game already exists - idempotent, no error
-	}
+	// If game wasn't created (already exists), this might be a duplicate event
+	// We still need to check if THIS specific event was already processed
+	// (different events can reference the same game_id)
 
 	// Serialize EventData to Payload for persistence
 	if err := serializeEventData(event); err != nil {
 		return err
 	}
 
-	// Persist event to audit trail (after game exists due to FK)
+	// Now persist event - game_id FK constraint is satisfied
+	// If it's a duplicate (same game_id, tx_hash, event_type),
+	// Upsert will skip it via ON CONFLICT DO NOTHING
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
 	}
 
+	// If event.ID is 0, it means the event was a duplicate and wasn't inserted
+	// Event already processed - idempotent, safe to return
+	if event.ID == 0 {
+		return nil
+	}
+
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, gameID)
+	uc.broadcastGameUpdate(ctx, gameID, GameEventTypeInitialized)
 
 	return nil
 }
@@ -226,15 +234,11 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	// Ensure player_two user exists (for FK constraint satisfaction)
-	// This creates a minimal "blockchain-only" user if they don't exist yet
-	if err := uc.userRepo.EnsureUserByWallet(ctx, playerTwo); err != nil {
-		return fmt.Errorf("failed to ensure player two user: %w", err)
-	}
-
-	// Update game with player 2 (FR-008) - must be done before event persistence due to FK
-	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
-		return fmt.Errorf("failed to join game: %w", err)
+	// Verify game exists (should be created by GameInitialized event)
+	// This is a safety check - normally GameInitialized comes first
+	_, err = uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
 	}
 
 	// Serialize EventData to Payload
@@ -242,13 +246,29 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 		return err
 	}
 
-	// Persist event (after game update due to FK)
+	// Check for duplicate event before modifying game state
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
 	}
 
+	// If event.ID is 0, the event was a duplicate - skip game update
+	if event.ID == 0 {
+		return nil // Event already processed - idempotent
+	}
+
+	// Ensure player_two user exists (for FK constraint satisfaction)
+	// This creates a minimal "blockchain-only" user if they don't exist yet
+	if err := uc.userRepo.EnsureUserByWallet(ctx, playerTwo); err != nil {
+		return fmt.Errorf("failed to ensure player two user: %w", err)
+	}
+
+	// Update game with player 2 (FR-008)
+	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
+		return fmt.Errorf("failed to join game: %w", err)
+	}
+
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID)
+	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeStarted)
 
 	return nil
 }
@@ -265,6 +285,27 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeGameFinished, event.EventType)
 	}
 
+	// Verify game exists (should be created by GameInitialized event)
+	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
+	}
+
+	// Serialize EventData to Payload FIRST
+	if err := serializeEventData(event); err != nil {
+		return err
+	}
+
+	// Check for duplicate event before modifying game state
+	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
+		return fmt.Errorf("failed to persist event: %w", err)
+	}
+
+	// If event.ID is 0, the event was a duplicate - skip
+	if event.ID == 0 {
+		return nil // Event already processed
+	}
+
 	// Extract event data
 	winner, err := extractString(event.EventData, "winner")
 	if err != nil {
@@ -274,7 +315,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 	// Payout is optional, default to 0 if not provided
 	payout, _ := extractInt64(event.EventData, "payout")
 
-	// Complete game (FR-012) - must be done before event persistence due to FK
+	// Complete game (FR-012)
 	if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash); err != nil {
 		return fmt.Errorf("failed to complete game: %w", err)
 	}
@@ -334,18 +375,8 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		}
 	}
 
-	// Serialize EventData to Payload
-	if err := serializeEventData(event); err != nil {
-		return err
-	}
-
-	// Persist event (after game update due to FK)
-	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
-		return fmt.Errorf("failed to persist event: %w", err)
-	}
-
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID)
+	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeFinished)
 
 	return nil
 }
@@ -362,14 +393,25 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeDraw, event.EventType)
 	}
 
+	// Verify game exists (should be created by GameInitialized event)
+	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
+	}
+
 	// Serialize EventData to Payload
 	if err := serializeEventData(event); err != nil {
 		return err
 	}
 
-	// Persist event
+	// Check for duplicate event
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
+	}
+
+	// If event.ID is 0, the event was a duplicate - skip
+	if event.ID == 0 {
+		return nil
 	}
 
 	// Complete game with no winner (FR-012)
@@ -397,7 +439,7 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID)
+	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeDraw)
 
 	return nil
 }
@@ -414,14 +456,25 @@ func (uc *GamePersistenceUseCase) HandleGameCancelled(ctx context.Context, event
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeGameCancelled, event.EventType)
 	}
 
+	// Verify game exists (should be created by GameInitialized event)
+	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
+	}
+
 	// Serialize EventData to Payload
 	if err := serializeEventData(event); err != nil {
 		return err
 	}
 
-	// Persist event
+	// Check for duplicate event
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
+	}
+
+	// If event.ID is 0, the event was a duplicate - skip
+	if event.ID == 0 {
+		return nil
 	}
 
 	// Cancel game
@@ -430,7 +483,7 @@ func (uc *GamePersistenceUseCase) HandleGameCancelled(ctx context.Context, event
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID)
+	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeCancelled)
 
 	return nil
 }
@@ -447,14 +500,25 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeSecretOpened, event.EventType)
 	}
 
+	// Verify game exists (should be created by GameInitialized event)
+	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
+	}
+
 	// Serialize EventData to Payload
 	if err := serializeEventData(event); err != nil {
 		return err
 	}
 
-	// Persist event
+	// Check for duplicate event
 	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
 		return fmt.Errorf("failed to persist event: %w", err)
+	}
+
+	// If event.ID is 0, the event was a duplicate - skip
+	if event.ID == 0 {
+		return nil
 	}
 
 	// Extract event data
@@ -475,7 +539,7 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID)
+	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeSecretOpened)
 
 	return nil
 }
@@ -490,6 +554,12 @@ func (uc *GamePersistenceUseCase) HandleInsufficientBalance(ctx context.Context,
 
 	if event.EventType != entity.EventTypeInsufficientBalance {
 		return fmt.Errorf("invalid event type: expected %s, got %s", entity.EventTypeInsufficientBalance, event.EventType)
+	}
+
+	// Verify game exists (should be created by GameInitialized event)
+	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	if err != nil {
+		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
 	}
 
 	// Serialize EventData to Payload

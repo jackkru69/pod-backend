@@ -11,6 +11,14 @@ import (
 	"pod-backend/pkg/logger"
 )
 
+// Retry configuration constants
+const (
+	maxRetries       = 3
+	initialBackoff   = 100 * time.Millisecond
+	maxBackoff       = 2 * time.Second
+	backoffMultiplier = 2.0
+)
+
 // BlockchainSubscriberUseCase subscribes to TON Center blockchain events and routes them
 // to GamePersistenceUseCase for processing.
 // Implements FR-001 (subscribe to blockchain), FR-008 (monitor game state changes),
@@ -74,6 +82,7 @@ func (uc *BlockchainSubscriberUseCase) SetMetrics(m *metrics.BlockchainMetrics) 
 
 // HandleTransaction implements toncenter.EventHandler interface.
 // Parses blockchain transaction into GameEvent and routes to appropriate handler.
+// Includes retry logic with exponential backoff for transient failures.
 // T096: Comprehensive logging (INFO for events, ERROR for persistence, WARN for validation)
 // T097: Prometheus metrics for monitoring
 func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx toncenter.Transaction) error {
@@ -101,10 +110,10 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 	uc.logger.Info("Parsed %s event for game_id=%d from transaction hash=%s",
 		event.EventType, event.GameID, event.TransactionHash)
 
-	// Route event to appropriate handler based on event type
-	if err := uc.routeEvent(ctx, event); err != nil {
-		uc.logger.Error("Failed to persist %s event for game_id=%d: %v",
-			event.EventType, event.GameID, err)
+	// Route event to appropriate handler with retry logic
+	if err := uc.routeEventWithRetry(ctx, event); err != nil {
+		uc.logger.Error("Failed to persist %s event for game_id=%d after %d retries: %v",
+			event.EventType, event.GameID, maxRetries, err)
 		if uc.metrics != nil {
 			uc.metrics.RecordEventFailed(event.EventType, "persistence_error")
 		}
@@ -200,6 +209,56 @@ func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction
 	}
 
 	return event, nil
+}
+
+// routeEventWithRetry routes a parsed GameEvent with retry logic and exponential backoff.
+// Retries transient failures (database connectivity, etc.) up to maxRetries times.
+func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, event *entity.GameEvent) error {
+	var lastErr error
+	backoff := initialBackoff
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			uc.logger.Warn("Retrying %s event for game_id=%d (attempt %d/%d, backoff=%v)",
+				event.EventType, event.GameID, attempt, maxRetries, backoff)
+			
+			// Wait with backoff before retry
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+			
+			// Increase backoff for next retry (exponential with cap)
+			backoff = time.Duration(float64(backoff) * backoffMultiplier)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+
+		err := uc.routeEvent(ctx, event)
+		if err == nil {
+			if attempt > 0 {
+				uc.logger.Info("Successfully processed %s event for game_id=%d after %d retries",
+					event.EventType, event.GameID, attempt)
+			}
+			return nil
+		}
+		lastErr = err
+		
+		// Check if context is cancelled
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Log retry attempt
+		if attempt < maxRetries {
+			uc.logger.Warn("Attempt %d failed for %s event game_id=%d: %v",
+				attempt+1, event.EventType, event.GameID, err)
+		}
+	}
+
+	return fmt.Errorf("all %d retry attempts failed: %w", maxRetries, lastErr)
 }
 
 // routeEvent routes a parsed GameEvent to the appropriate handler in GamePersistenceUseCase.
