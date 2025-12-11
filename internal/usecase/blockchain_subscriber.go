@@ -48,7 +48,7 @@ func DefaultRetryConfig() RetryConfig {
 type BlockchainSubscriberUseCase struct {
 	eventSource        toncenter.EventSource
 	persistenceUseCase *GamePersistenceUseCase
-	dlqUseCase         *DeadLetterQueueUseCase    // Optional DLQ for failed transactions (Issue #6)
+	dlqUseCase         *DeadLetterQueueUseCase // Optional DLQ for failed transactions (Issue #6)
 	logger             logger.Interface
 	metrics            *metrics.BlockchainMetrics // Optional metrics (T097)
 	retryConfig        RetryConfig                // Retry configuration (Issue #9)
@@ -166,14 +166,14 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 		if uc.metrics != nil {
 			uc.metrics.RecordEventFailed(event.EventType, "persistence_error")
 		}
-		
+
 		// Store in DLQ for later retry (Issue #6)
 		if uc.dlqUseCase != nil {
 			if dlqErr := uc.dlqUseCase.StoreFailedTransaction(ctx, tx, err, entity.DLQErrorTypePersistence); dlqErr != nil {
 				uc.logger.Error("Failed to store transaction in DLQ: tx=%s, error=%v", tx.Hash(), dlqErr)
 			}
 		}
-		
+
 		return fmt.Errorf("failed to route event: %w", err)
 	}
 

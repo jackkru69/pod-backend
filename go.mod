@@ -35,6 +35,11 @@ require (
 	github.com/ulule/limiter/v3 v3.11.2
 	github.com/valyala/fasthttp v1.68.0
 	github.com/xssnick/tonutils-go v1.15.5
+	go.opentelemetry.io/otel v1.39.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.39.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.39.0
+	go.opentelemetry.io/otel/sdk v1.39.0
+	go.opentelemetry.io/otel/trace v1.39.0
 	go.uber.org/mock v0.6.0
 	golang.org/x/sync v0.18.0
 	google.golang.org/grpc v1.77.0
@@ -369,7 +374,6 @@ require (
 	github.com/yeya24/promlinter v0.3.0 // indirect
 	github.com/ykadowak/zerologlint v0.1.5 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d // indirect
-	github.com/zeebo/errs v1.4.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
 	gitlab.com/bosi/decorder v0.4.2 // indirect
 	gitlab.com/nyarla/go-crypt v0.0.0-20160106005555-d9a5dc2b789b // indirect
@@ -383,13 +387,8 @@ require (
 	go.opentelemetry.io/contrib/detectors/gcp v1.38.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.61.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
-	go.opentelemetry.io/otel v1.39.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.39.0 // indirect
-	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.39.0 // indirect
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.39.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.39.0 // indirect
-	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect

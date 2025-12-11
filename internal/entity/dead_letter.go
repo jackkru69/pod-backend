@@ -100,13 +100,13 @@ func (e *DeadLetterEntry) ScheduleNextRetry(baseBackoff time.Duration) {
 	// Exponential backoff: baseBackoff * 2^retryCount
 	multiplier := 1 << e.RetryCount // 2^retryCount
 	backoff := baseBackoff * time.Duration(multiplier)
-	
+
 	// Cap at 1 hour
 	maxBackoff := time.Hour
 	if backoff > maxBackoff {
 		backoff = maxBackoff
 	}
-	
+
 	nextRetry := time.Now().Add(backoff)
 	e.NextRetryAt = &nextRetry
 }

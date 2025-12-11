@@ -115,7 +115,7 @@ type (
 
 	// Tracing - OpenTelemetry tracing configuration (Issue #10)
 	Tracing struct {
-		Enabled      bool   `env:"TRACING_ENABLED" envDefault:"false"`            // Enable distributed tracing
+		Enabled      bool   `env:"TRACING_ENABLED" envDefault:"false"`                // Enable distributed tracing
 		OTLPEndpoint string `env:"TRACING_OTLP_ENDPOINT" envDefault:"localhost:4318"` // OTLP collector endpoint
 	}
 )
