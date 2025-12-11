@@ -154,21 +154,21 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 	// Deep copy subscribers while holding lock to prevent race condition
 	uc.mu.RLock()
 	allSubscribers := make(map[string]*subscriber)
-	
+
 	// Copy game-specific subscribers
 	if gameSubscribers := uc.gameSubscribers[game.GameID]; gameSubscribers != nil {
 		for k, v := range gameSubscribers {
 			allSubscribers[k] = v
 		}
 	}
-	
+
 	// Copy global subscribers
 	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
 		for k, v := range globalSubscribers {
 			allSubscribers[k] = v
 		}
 	}
-	
+
 	// Also capture which clients are global for later cleanup
 	globalClientIDs := make(map[string]bool)
 	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
@@ -374,21 +374,21 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 	// Deep copy subscribers while holding lock to prevent race condition
 	uc.mu.RLock()
 	allSubscribers := make(map[string]*subscriber)
-	
+
 	// Copy game-specific subscribers
 	if gameSubscribers := uc.gameSubscribers[gameID]; gameSubscribers != nil {
 		for k, v := range gameSubscribers {
 			allSubscribers[k] = v
 		}
 	}
-	
+
 	// Copy global subscribers
 	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
 		for k, v := range globalSubscribers {
 			allSubscribers[k] = v
 		}
 	}
-	
+
 	// Track which clients are global for later cleanup
 	globalClientIDs := make(map[string]bool)
 	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {

@@ -413,6 +413,11 @@ func (r *GameRepository) RevealChoice(ctx context.Context, gameID int64, playerA
 
 // CompleteGame updates a game when it's finished.
 func (r *GameRepository) CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error {
+	return r.CompleteGameWithQuerier(ctx, r.pg.Pool, gameID, winnerAddress, payoutAmount, completeTxHash)
+}
+
+// CompleteGameWithQuerier performs CompleteGame using the provided Querier (for transaction support).
+func (r *GameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error {
 	now := time.Now()
 	sql, args, err := r.pg.Builder.
 		Update("games").
@@ -427,7 +432,7 @@ func (r *GameRepository) CompleteGame(ctx context.Context, gameID int64, winnerA
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err = q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}

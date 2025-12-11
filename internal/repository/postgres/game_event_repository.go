@@ -62,6 +62,11 @@ func (r *GameEventRepository) Create(ctx context.Context, event *entity.GameEven
 
 // Upsert creates a new game event or ignores if already exists (idempotent operation).
 func (r *GameEventRepository) Upsert(ctx context.Context, event *entity.GameEvent) error {
+	return r.UpsertWithQuerier(ctx, r.pg.Pool, event)
+}
+
+// UpsertWithQuerier performs Upsert using the provided Querier (for transaction support).
+func (r *GameEventRepository) UpsertWithQuerier(ctx context.Context, q repository.Querier, event *entity.GameEvent) error {
 	if err := event.Validate(); err != nil {
 		return fmt.Errorf("validation failed: %w", err)
 	}
@@ -92,7 +97,7 @@ func (r *GameEventRepository) Upsert(ctx context.Context, event *entity.GameEven
 
 	// QueryRow will return no rows if ON CONFLICT DO NOTHING triggered (duplicate)
 	// This is expected and not an error
-	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&event.ID, &event.CreatedAt)
+	err = q.QueryRow(ctx, sql, args...).Scan(&event.ID, &event.CreatedAt)
 	if err != nil && err.Error() != "no rows in result set" {
 		return fmt.Errorf("execute query: %w", err)
 	}

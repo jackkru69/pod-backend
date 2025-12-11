@@ -339,14 +339,14 @@ func (uc *ReservationUseCase) CleanupExpired(ctx context.Context) {
 			expiredGames = append(expiredGames, gameID)
 			expiredReservations = append(expiredReservations, reservation)
 		}
-		
+
 		// Collect non-active reservations for cleanup (memory leak fix)
 		// Keep expired reservations for a short time for debugging, then remove
 		if !reservation.IsActive() {
 			staleGameIDs = append(staleGameIDs, gameID)
 		}
 	}
-	
+
 	// Remove stale reservations from memory to prevent leak
 	for _, gameID := range staleGameIDs {
 		delete(uc.reservations, gameID)

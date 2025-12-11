@@ -81,39 +81,39 @@ func TestWebSocketSubscriberLtUpdate(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		txLt        string
-		expectedLt  string
+		name         string
+		txLt         string
+		expectedLt   string
 		shouldUpdate bool
 	}{
 		{
-			name:        "first transaction",
-			txLt:        "100",
-			expectedLt:  "100",
+			name:         "first transaction",
+			txLt:         "100",
+			expectedLt:   "100",
 			shouldUpdate: true,
 		},
 		{
-			name:        "newer transaction",
-			txLt:        "200",
-			expectedLt:  "200",
+			name:         "newer transaction",
+			txLt:         "200",
+			expectedLt:   "200",
 			shouldUpdate: true,
 		},
 		{
-			name:        "older transaction - should not update",
-			txLt:        "150",
-			expectedLt:  "200", // Should stay at 200
+			name:         "older transaction - should not update",
+			txLt:         "150",
+			expectedLt:   "200", // Should stay at 200
 			shouldUpdate: false,
 		},
 		{
-			name:        "same lt - should not update",
-			txLt:        "200",
-			expectedLt:  "200",
+			name:         "same lt - should not update",
+			txLt:         "200",
+			expectedLt:   "200",
 			shouldUpdate: false,
 		},
 		{
-			name:        "bug case: string 9 vs numeric 10",
-			txLt:        "9",
-			expectedLt:  "200", // Should NOT update because 9 < 200
+			name:         "bug case: string 9 vs numeric 10",
+			txLt:         "9",
+			expectedLt:   "200", // Should NOT update because 9 < 200
 			shouldUpdate: false,
 		},
 	}
@@ -122,10 +122,10 @@ func TestWebSocketSubscriberLtUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock transaction
 			tx := createMockTransaction(tt.txLt)
-			
+
 			// Call HandleTransaction
 			_ = sub.HandleTransaction(context.Background(), tx)
-			
+
 			// Verify lastProcessedLt
 			if sub.lastProcessedLt != tt.expectedLt {
 				t.Errorf("lastProcessedLt = %q, want %q", sub.lastProcessedLt, tt.expectedLt)
@@ -137,14 +137,14 @@ func TestWebSocketSubscriberLtUpdate(t *testing.T) {
 // TestStringComparisonBug demonstrates why string comparison is wrong.
 func TestStringComparisonBug(t *testing.T) {
 	// This test demonstrates the bug that was fixed
-	
+
 	// String comparison (WRONG):
 	// "9" > "10" is TRUE because '9' > '1' in ASCII
 	stringResult := "9" > "10"
 	if !stringResult {
 		t.Error("Expected string comparison '9' > '10' to be true (demonstrating the bug)")
 	}
-	
+
 	// Numeric comparison (CORRECT):
 	// 9 > 10 is FALSE
 	numericResult := compareLt("9", "10")

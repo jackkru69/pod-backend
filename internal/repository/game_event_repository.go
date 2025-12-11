@@ -18,6 +18,9 @@ type GameEventRepository interface {
 	// Implements ON CONFLICT DO NOTHING for idempotency.
 	Upsert(ctx context.Context, event *entity.GameEvent) error
 
+	// UpsertWithQuerier performs Upsert using the provided Querier (for transaction support).
+	UpsertWithQuerier(ctx context.Context, q Querier, event *entity.GameEvent) error
+
 	// GetByGameID retrieves all events for a specific game.
 	// Events are returned in chronological order (by timestamp).
 	// Returns empty slice if no events found.

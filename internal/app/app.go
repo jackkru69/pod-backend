@@ -75,6 +75,9 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	eventRepo := repopg.NewGameEventRepository(pg)
 	syncStateRepo := repopg.NewBlockchainSyncStateRepository(pg)
 
+	// Initialize transaction manager for atomic database operations
+	txManager := postgres.NewTxManager(pg.Pool)
+
 	// Initialize use cases
 	gameQueryUC := usecase.NewGameQueryUseCase(gameRepo)
 	gameBroadcastUC := usecase.NewGameBroadcastUseCase()
@@ -110,6 +113,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Initialize blockchain persistence use case (T093)
 	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
+	gamePersistenceUC.SetTxManager(txManager) // Enable transactional operations for atomic updates
 	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC) // Wire WebSocket broadcasting
 
 	// Initialize blockchain metrics (T097)

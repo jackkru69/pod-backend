@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"pod-backend/internal/entity"
+	"pod-backend/internal/repository"
 
 	"github.com/stretchr/testify/mock"
 )
@@ -101,6 +102,11 @@ func (m *MockGameRepository) CreateOrIgnore(ctx context.Context, game *entity.Ga
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockGameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winner string, payout int64, finishTxHash string) error {
+	args := m.Called(ctx, q, gameID, winner, payout, finishTxHash)
+	return args.Error(0)
+}
+
 // MockUserRepository implements repository.UserRepository for testing
 type MockUserRepository struct {
 	mock.Mock
@@ -163,8 +169,18 @@ func (m *MockUserRepository) IncrementGamesPlayed(ctx context.Context, walletAdd
 	return args.Error(0)
 }
 
+func (m *MockUserRepository) IncrementGamesPlayedWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
+	args := m.Called(ctx, q, walletAddress)
+	return args.Error(0)
+}
+
 func (m *MockUserRepository) IncrementWins(ctx context.Context, walletAddress string) error {
 	args := m.Called(ctx, walletAddress)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) IncrementWinsWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
+	args := m.Called(ctx, q, walletAddress)
 	return args.Error(0)
 }
 
@@ -173,8 +189,18 @@ func (m *MockUserRepository) IncrementLosses(ctx context.Context, walletAddress 
 	return args.Error(0)
 }
 
+func (m *MockUserRepository) IncrementLossesWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
+	args := m.Called(ctx, q, walletAddress)
+	return args.Error(0)
+}
+
 func (m *MockUserRepository) IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error {
 	args := m.Called(ctx, walletAddress, earningsNanotons)
+	return args.Error(0)
+}
+
+func (m *MockUserRepository) IncrementReferralsWithQuerier(ctx context.Context, q repository.Querier, walletAddress string, earningsNanotons int64) error {
+	args := m.Called(ctx, q, walletAddress, earningsNanotons)
 	return args.Error(0)
 }
 
@@ -203,6 +229,15 @@ func (m *MockGameEventRepository) Create(ctx context.Context, event *entity.Game
 
 func (m *MockGameEventRepository) Upsert(ctx context.Context, event *entity.GameEvent) error {
 	args := m.Called(ctx, event)
+	// Note: To simulate duplicate (ON CONFLICT DO NOTHING), use Run() in test to set event.ID=0
+	// The default behavior sets event.ID=1 to simulate successful insert
+	// But if Run() was used and set event.ID to something, we respect that
+	return args.Error(0)
+}
+
+func (m *MockGameEventRepository) UpsertWithQuerier(ctx context.Context, q repository.Querier, event *entity.GameEvent) error {
+	args := m.Called(ctx, q, event)
+	// Same as above - Run() can override the default behavior
 	return args.Error(0)
 }
 

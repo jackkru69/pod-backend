@@ -41,15 +41,27 @@ type UserRepository interface {
 	// IncrementGamesPlayed atomically increments total_games_played counter.
 	IncrementGamesPlayed(ctx context.Context, walletAddress string) error
 
+	// IncrementGamesPlayedWithQuerier performs IncrementGamesPlayed using provided Querier (for transaction support).
+	IncrementGamesPlayedWithQuerier(ctx context.Context, q Querier, walletAddress string) error
+
 	// IncrementWins atomically increments total_wins counter.
 	IncrementWins(ctx context.Context, walletAddress string) error
+
+	// IncrementWinsWithQuerier performs IncrementWins using provided Querier (for transaction support).
+	IncrementWinsWithQuerier(ctx context.Context, q Querier, walletAddress string) error
 
 	// IncrementLosses atomically increments total_losses counter.
 	IncrementLosses(ctx context.Context, walletAddress string) error
 
+	// IncrementLossesWithQuerier performs IncrementLosses using provided Querier (for transaction support).
+	IncrementLossesWithQuerier(ctx context.Context, q Querier, walletAddress string) error
+
 	// IncrementReferrals atomically increments total_referrals and adds to total_referral_earnings.
 	// Used when a referred player completes a game.
 	IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error
+
+	// IncrementReferralsWithQuerier performs IncrementReferrals using provided Querier (for transaction support).
+	IncrementReferralsWithQuerier(ctx context.Context, q Querier, walletAddress string, earningsNanotons int64) error
 
 	// GetReferralStats retrieves referral statistics for a user (FR-021).
 	// Returns aggregated referral metrics including total referrals, earnings, and games referred.

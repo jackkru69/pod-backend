@@ -48,7 +48,10 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 	})).Return(true, nil)
 
 	// Expect event to be persisted - called SECOND
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil)
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 
@@ -139,10 +142,21 @@ func TestHandleGameStarted_Success(t *testing.T) {
 		},
 	}
 
+	// Mock game retrieval (safety check in HandleGameStarted)
+	existingGame := &entity.Game{
+		GameID:           123,
+		PlayerOneAddress: "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		Status:           entity.GameStatusWaitingForOpponent,
+	}
+	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
+
 	// Expect user to be ensured for FK constraint
 	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQAnotherPlayerWalletAddress123456789012345678").Return(nil)
 
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil)
 	mockGameRepo.On("JoinGame", mock.Anything, int64(123), "EQAnotherPlayerWalletAddress123456789012345678", "tx_start_123").Return(nil)
 
 	err := uc.HandleGameStarted(context.Background(), event)
@@ -188,7 +202,10 @@ func TestHandleGameFinished_Success(t *testing.T) {
 		},
 	}
 
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil)
 	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123").Return(nil)
 
 	// Expect user statistics updates
@@ -237,7 +254,10 @@ func TestHandleDraw_Success(t *testing.T) {
 		},
 	}
 
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil)
 	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), "", int64(0), "tx_draw_123").Return(nil)
 
 	// Both players should have games played incremented (no winner/loser)
@@ -280,17 +300,37 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 	// First call - should process normally
 	// Order: Create game first, then Upsert event
 	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(true, nil).Once()
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil).Once()
+	// Upsert sets event.ID = 1 (via Run) - indicates new event
+	mockEventRepo.On("Upsert", mock.Anything, mock.MatchedBy(func(e *entity.GameEvent) bool {
+		return e.TransactionHash == "tx_init_123"
+	})).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil).Once()
 
 	err := uc.HandleGameInitialized(context.Background(), event)
 	assert.NoError(t, err)
+	assert.NotZero(t, event.ID, "Event ID should be set after first successful Upsert")
+
+	// Reset event.ID to simulate a new call (in real code, the same event object might be reused)
+	event.ID = 0
+	event.Payload = "" // Reset payload to re-serialize
 
 	// Second call with same tx hash - CreateOrIgnore returns false (game already exists)
-	// Since game already exists, Upsert should NOT be called (idempotent)
+	// Upsert is still called but should return event.ID=0 (duplicate via ON CONFLICT DO NOTHING)
 	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(false, nil).Once()
+	// This time simulate duplicate - set event.ID back to 0 after Upsert mock returns
+	mockEventRepo.On("Upsert", mock.Anything, mock.MatchedBy(func(e *entity.GameEvent) bool {
+		return e.TransactionHash == "tx_init_123"
+	})).Run(func(args mock.Arguments) {
+		// Simulate ON CONFLICT DO NOTHING - event.ID stays 0
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 0
+	}).Return(nil).Once()
 
 	err = uc.HandleGameInitialized(context.Background(), event)
 	assert.NoError(t, err) // No error - idempotent processing
+	assert.Zero(t, event.ID, "Event ID should be 0 for duplicate event")
 
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
@@ -336,7 +376,10 @@ func TestHandleGameFinished_WithReferrer(t *testing.T) {
 		},
 	}
 
-	mockEventRepo.On("Upsert", mock.Anything, event).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1 // Simulate successful insert
+	}).Return(nil)
 	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123").Return(nil)
 
 	// Expect user statistics updates

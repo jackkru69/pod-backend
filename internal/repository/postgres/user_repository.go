@@ -292,6 +292,11 @@ func (r *UserRepository) Update(ctx context.Context, user *entity.User) error {
 
 // IncrementGamesPlayed atomically increments total_games_played counter.
 func (r *UserRepository) IncrementGamesPlayed(ctx context.Context, walletAddress string) error {
+	return r.IncrementGamesPlayedWithQuerier(ctx, r.pg.Pool, walletAddress)
+}
+
+// IncrementGamesPlayedWithQuerier performs IncrementGamesPlayed using provided Querier (for transaction support).
+func (r *UserRepository) IncrementGamesPlayedWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
 		Set("total_games_played", sq.Expr("total_games_played + 1")).
@@ -301,7 +306,7 @@ func (r *UserRepository) IncrementGamesPlayed(ctx context.Context, walletAddress
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err = q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}
@@ -311,6 +316,11 @@ func (r *UserRepository) IncrementGamesPlayed(ctx context.Context, walletAddress
 
 // IncrementWins atomically increments total_wins counter.
 func (r *UserRepository) IncrementWins(ctx context.Context, walletAddress string) error {
+	return r.IncrementWinsWithQuerier(ctx, r.pg.Pool, walletAddress)
+}
+
+// IncrementWinsWithQuerier performs IncrementWins using provided Querier (for transaction support).
+func (r *UserRepository) IncrementWinsWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
 		Set("total_wins", sq.Expr("total_wins + 1")).
@@ -320,7 +330,7 @@ func (r *UserRepository) IncrementWins(ctx context.Context, walletAddress string
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err = q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}
@@ -330,6 +340,11 @@ func (r *UserRepository) IncrementWins(ctx context.Context, walletAddress string
 
 // IncrementLosses atomically increments total_losses counter.
 func (r *UserRepository) IncrementLosses(ctx context.Context, walletAddress string) error {
+	return r.IncrementLossesWithQuerier(ctx, r.pg.Pool, walletAddress)
+}
+
+// IncrementLossesWithQuerier performs IncrementLosses using provided Querier (for transaction support).
+func (r *UserRepository) IncrementLossesWithQuerier(ctx context.Context, q repository.Querier, walletAddress string) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
 		Set("total_losses", sq.Expr("total_losses + 1")).
@@ -339,7 +354,7 @@ func (r *UserRepository) IncrementLosses(ctx context.Context, walletAddress stri
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err = q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}
@@ -349,6 +364,11 @@ func (r *UserRepository) IncrementLosses(ctx context.Context, walletAddress stri
 
 // IncrementReferrals atomically increments total_referrals and adds to total_referral_earnings.
 func (r *UserRepository) IncrementReferrals(ctx context.Context, walletAddress string, earningsNanotons int64) error {
+	return r.IncrementReferralsWithQuerier(ctx, r.pg.Pool, walletAddress, earningsNanotons)
+}
+
+// IncrementReferralsWithQuerier performs IncrementReferrals using provided Querier (for transaction support).
+func (r *UserRepository) IncrementReferralsWithQuerier(ctx context.Context, q repository.Querier, walletAddress string, earningsNanotons int64) error {
 	sql, args, err := r.pg.Builder.
 		Update("users").
 		Set("total_referrals", sq.Expr("total_referrals + 1")).
@@ -359,7 +379,7 @@ func (r *UserRepository) IncrementReferrals(ctx context.Context, walletAddress s
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err = q.Exec(ctx, sql, args...)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}

@@ -19,7 +19,8 @@ type GamePersistenceUseCase struct {
 	gameRepo    repository.GameRepository
 	eventRepo   repository.GameEventRepository
 	userRepo    repository.UserRepository
-	broadcastUC *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
+	txManager   repository.TxManager      // Optional: for transactional operations
+	broadcastUC *GameBroadcastUseCase     // Optional: nil when WebSocket not enabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -32,8 +33,15 @@ func NewGamePersistenceUseCase(
 		gameRepo:    gameRepo,
 		eventRepo:   eventRepo,
 		userRepo:    userRepo,
+		txManager:   nil, // Set via SetTxManager
 		broadcastUC: nil, // Set via SetBroadcastUseCase
 	}
+}
+
+// SetTxManager sets the transaction manager for atomic multi-repository operations.
+// This is optional - if not set, operations execute without transactions (legacy behavior).
+func (uc *GamePersistenceUseCase) SetTxManager(txManager repository.TxManager) {
+	uc.txManager = txManager
 }
 
 // SetBroadcastUseCase sets the broadcast use case for real-time WebSocket updates (T093).
@@ -275,6 +283,7 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 
 // HandleGameFinished processes GameFinishedNotify event.
 // Completes game with winner and payout, updates user statistics.
+// Uses database transaction to ensure atomicity of game completion and stats updates.
 func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event *entity.GameEvent) error {
 	// Validate event (FR-011)
 	if err := event.Validate(); err != nil {
@@ -286,7 +295,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 	}
 
 	// Verify game exists (should be created by GameInitialized event)
-	_, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	game, err := uc.gameRepo.GetByID(ctx, event.GameID)
 	if err != nil {
 		return fmt.Errorf("game %d not found (GameInitialized may not have been processed yet): %w", event.GameID, err)
 	}
@@ -296,17 +305,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		return err
 	}
 
-	// Check for duplicate event before modifying game state
-	if err := uc.eventRepo.Upsert(ctx, event); err != nil {
-		return fmt.Errorf("failed to persist event: %w", err)
-	}
-
-	// If event.ID is 0, the event was a duplicate - skip
-	if event.ID == 0 {
-		return nil // Event already processed
-	}
-
-	// Extract event data
+	// Extract event data before transaction
 	winner, err := extractString(event.EventData, "winner")
 	if err != nil {
 		return fmt.Errorf("invalid event data: %w", err)
@@ -315,68 +314,131 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 	// Payout is optional, default to 0 if not provided
 	payout, _ := extractInt64(event.EventData, "payout")
 
-	// Complete game (FR-012)
-	if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash); err != nil {
-		return fmt.Errorf("failed to complete game: %w", err)
+	// Determine loser before transaction
+	var loser string
+	if game.PlayerOneAddress == winner {
+		if game.PlayerTwoAddress != nil {
+			loser = *game.PlayerTwoAddress
+		}
+	} else {
+		loser = game.PlayerOneAddress
 	}
 
-	// Update user statistics if userRepo is available
-	if uc.userRepo != nil {
-		// Get game to determine loser
-		game, err := uc.gameRepo.GetByID(ctx, event.GameID)
+	// Determine referrer before transaction
+	var referrerAddress *string
+	var referrerEarnings int64
+	if game.PlayerOneAddress == winner && game.PlayerOneReferrer != nil {
+		referrerAddress = game.PlayerOneReferrer
+	} else if game.PlayerTwoAddress != nil && *game.PlayerTwoAddress == winner && game.PlayerTwoReferrer != nil {
+		referrerAddress = game.PlayerTwoReferrer
+	}
+	if referrerAddress != nil && *referrerAddress != "" {
+		// Calculate referrer earnings: (bet_amount * referrer_fee_numerator) / 10000
+		// referrer_fee_numerator is in basis points (1/10000)
+		referrerEarnings = (game.BetAmount * game.ReferrerFeeNumerator) / 10000
+	}
+
+	// If TxManager is available, use transaction for atomicity
+	if uc.txManager != nil {
+		err = uc.txManager.WithTx(ctx, func(tx repository.Querier) error {
+			// Check for duplicate event within transaction
+			if err := uc.eventRepo.UpsertWithQuerier(ctx, tx, event); err != nil {
+				return fmt.Errorf("failed to persist event: %w", err)
+			}
+
+			// If event.ID is 0, the event was a duplicate - rollback
+			if event.ID == 0 {
+				return nil // Will commit empty transaction
+			}
+
+			// Complete game (FR-012)
+			if err := uc.gameRepo.CompleteGameWithQuerier(ctx, tx, event.GameID, winner, payout, event.TransactionHash); err != nil {
+				return fmt.Errorf("failed to complete game: %w", err)
+			}
+
+			// Update user statistics if userRepo is available
+			if uc.userRepo != nil {
+				// Update winner stats
+				if err := uc.userRepo.IncrementGamesPlayedWithQuerier(ctx, tx, winner); err != nil {
+					return fmt.Errorf("failed to increment games played for winner: %w", err)
+				}
+				if err := uc.userRepo.IncrementWinsWithQuerier(ctx, tx, winner); err != nil {
+					return fmt.Errorf("failed to increment wins: %w", err)
+				}
+
+				// Update loser stats
+				if loser != "" {
+					if err := uc.userRepo.IncrementGamesPlayedWithQuerier(ctx, tx, loser); err != nil {
+						return fmt.Errorf("failed to increment games played for loser: %w", err)
+					}
+					if err := uc.userRepo.IncrementLossesWithQuerier(ctx, tx, loser); err != nil {
+						return fmt.Errorf("failed to increment losses: %w", err)
+					}
+				}
+
+				// Update referrer statistics (FR-020, FR-021, T091)
+				if referrerAddress != nil && *referrerAddress != "" && referrerEarnings > 0 {
+					if err := uc.userRepo.IncrementReferralsWithQuerier(ctx, tx, *referrerAddress, referrerEarnings); err != nil {
+						return fmt.Errorf("failed to update referrer stats: %w", err)
+					}
+				}
+			}
+
+			return nil
+		})
 		if err != nil {
-			return fmt.Errorf("failed to get game for stats update: %w", err)
+			return err
+		}
+	} else {
+		// Legacy non-transactional behavior for backward compatibility
+		// Check for duplicate event before modifying game state
+		if err := uc.eventRepo.Upsert(ctx, event); err != nil {
+			return fmt.Errorf("failed to persist event: %w", err)
 		}
 
-		// Determine loser
-		var loser string
-		if game.PlayerOneAddress == winner {
-			if game.PlayerTwoAddress != nil {
-				loser = *game.PlayerTwoAddress
+		// If event.ID is 0, the event was a duplicate - skip
+		if event.ID == 0 {
+			return nil // Event already processed
+		}
+
+		// Complete game (FR-012)
+		if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash); err != nil {
+			return fmt.Errorf("failed to complete game: %w", err)
+		}
+
+		// Update user statistics if userRepo is available
+		if uc.userRepo != nil {
+			// Update statistics
+			if err := uc.userRepo.IncrementGamesPlayed(ctx, winner); err != nil {
+				return fmt.Errorf("failed to increment games played for winner: %w", err)
 			}
-		} else {
-			loser = game.PlayerOneAddress
-		}
-
-		// Update statistics
-		if err := uc.userRepo.IncrementGamesPlayed(ctx, winner); err != nil {
-			return fmt.Errorf("failed to increment games played for winner: %w", err)
-		}
-		if err := uc.userRepo.IncrementWins(ctx, winner); err != nil {
-			return fmt.Errorf("failed to increment wins: %w", err)
-		}
-
-		if loser != "" {
-			if err := uc.userRepo.IncrementGamesPlayed(ctx, loser); err != nil {
-				return fmt.Errorf("failed to increment games played for loser: %w", err)
+			if err := uc.userRepo.IncrementWins(ctx, winner); err != nil {
+				return fmt.Errorf("failed to increment wins: %w", err)
 			}
-			if err := uc.userRepo.IncrementLosses(ctx, loser); err != nil {
-				return fmt.Errorf("failed to increment losses: %w", err)
+
+			if loser != "" {
+				if err := uc.userRepo.IncrementGamesPlayed(ctx, loser); err != nil {
+					return fmt.Errorf("failed to increment games played for loser: %w", err)
+				}
+				if err := uc.userRepo.IncrementLosses(ctx, loser); err != nil {
+					return fmt.Errorf("failed to increment losses: %w", err)
+				}
 			}
-		}
 
-		// Update referrer statistics (FR-020, FR-021, T091)
-		// Calculate referrer earnings based on bet amount and referrer fee
-		var referrerAddress *string
-		if game.PlayerOneAddress == winner && game.PlayerOneReferrer != nil {
-			referrerAddress = game.PlayerOneReferrer
-		} else if game.PlayerTwoAddress != nil && *game.PlayerTwoAddress == winner && game.PlayerTwoReferrer != nil {
-			referrerAddress = game.PlayerTwoReferrer
-		}
-
-		if referrerAddress != nil && *referrerAddress != "" {
-			// Calculate referrer earnings: (bet_amount * referrer_fee_numerator) / 10000
-			// referrer_fee_numerator is in basis points (1/10000)
-			referrerEarnings := (game.BetAmount * game.ReferrerFeeNumerator) / 10000
-
-			if err := uc.userRepo.IncrementReferrals(ctx, *referrerAddress, referrerEarnings); err != nil {
-				return fmt.Errorf("failed to update referrer stats: %w", err)
+			// Update referrer statistics (FR-020, FR-021, T091)
+			if referrerAddress != nil && *referrerAddress != "" && referrerEarnings > 0 {
+				if err := uc.userRepo.IncrementReferrals(ctx, *referrerAddress, referrerEarnings); err != nil {
+					return fmt.Errorf("failed to update referrer stats: %w", err)
+				}
 			}
 		}
 	}
 
-	// Broadcast game update to WebSocket subscribers (T093)
-	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeFinished)
+	// Only broadcast if event was actually processed (not a duplicate)
+	if event.ID != 0 {
+		// Broadcast game update to WebSocket subscribers (T093)
+		uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeFinished)
+	}
 
 	return nil
 }

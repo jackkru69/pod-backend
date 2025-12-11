@@ -65,6 +65,9 @@ type GameRepository interface {
 	// Returns error if game doesn't exist.
 	CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error
 
+	// CompleteGameWithQuerier performs CompleteGame using the provided Querier (for transaction support).
+	CompleteGameWithQuerier(ctx context.Context, q Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error
+
 	// CancelGame marks a game as cancelled.
 	// Updates status to ENDED with no winner.
 	// Returns error if game doesn't exist.
