@@ -26,6 +26,7 @@ type Transaction struct {
 	BlockNumber int64           `json:"block"`
 	Timestamp   int64           `json:"utime"`
 	Data        json.RawMessage `json:"data"`
+	PrevTransLt string          `json:"prev_trans_lt,omitempty"`
 }
 
 type GetTransactionsResponse struct {

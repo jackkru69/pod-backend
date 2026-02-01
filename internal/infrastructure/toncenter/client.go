@@ -60,14 +60,16 @@ type Transaction struct {
 		Lt   string `json:"lt"`    // Logical time
 		Hash string `json:"hash"`  // Transaction hash (base64)
 	} `json:"transaction_id"`
-	Utime      int64           `json:"utime"`       // Unix timestamp
-	Data       string          `json:"data"`        // Base64-encoded BOC transaction data
-	InMsg      json.RawMessage `json:"in_msg"`      // Incoming message data
-	OutMsgs    json.RawMessage `json:"out_msgs"`    // Outgoing messages data
-	Fee        string          `json:"fee"`         // Transaction fee in nanotons
-	StorageFee string          `json:"storage_fee"` // Storage fee in nanotons
-	OtherFee   string          `json:"other_fee"`   // Other fees in nanotons
-	Address    json.RawMessage `json:"address"`     // Account address info
+	Utime         int64           `json:"utime"`           // Unix timestamp
+	Data          string          `json:"data"`            // Base64-encoded BOC transaction data
+	InMsg         json.RawMessage `json:"in_msg"`          // Incoming message data
+	OutMsgs       json.RawMessage `json:"out_msgs"`        // Outgoing messages data
+	PrevTransLt   string          `json:"prev_trans_lt"`   // Previous transaction logical time
+	PrevTransHash string          `json:"prev_trans_hash"` // Previous transaction hash
+	Fee           string          `json:"fee"`             // Transaction fee in nanotons
+	StorageFee    string          `json:"storage_fee"`     // Storage fee in nanotons
+	OtherFee      string          `json:"other_fee"`       // Other fees in nanotons
+	Address       json.RawMessage `json:"address"`         // Account address info
 }
 
 // Hash returns the transaction hash for convenience

@@ -175,6 +175,18 @@ func (p *Poller) poll(ctx context.Context) {
 		return n1.Cmp(n2) < 0 // ASC order (oldest first)
 	})
 
+	// Check for transaction gaps (US-002)
+	// If the oldest new transaction's previous lt is newer than our last processed lt,
+	// it means we missed some intermediate transactions.
+	if len(newTxs) > 0 && p.lastProcessedLt != "0" {
+		oldestTx := newTxs[0]
+		// Check if PrevTransLt is available and strictly greater than lastProcessedLt
+		if oldestTx.PrevTransLt != "" && compareLt(oldestTx.PrevTransLt, p.lastProcessedLt) {
+			p.logger.Warn("Gap Detected: Oldest fetched tx (lt=%s) prev_lt=%s is newer than lastProcessedLt=%s",
+				oldestTx.Lt(), oldestTx.PrevTransLt, p.lastProcessedLt)
+		}
+	}
+
 	// Process transactions in chronological order (oldest first)
 	// Track the last SUCCESSFULLY processed lt to ensure failed transactions are retried
 	var lastSuccessfulLt string
