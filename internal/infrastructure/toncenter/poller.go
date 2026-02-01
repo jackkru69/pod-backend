@@ -136,7 +136,7 @@ func (p *Poller) poll(ctx context.Context) {
 	p.logger.Debug("Polling from lt %s", p.lastProcessedLt)
 
 	// Note: fromBlock parameter is not actually used by TON Center REST API
-	txs, err := p.client.GetTransactions(ctx, 0, PollBatchSize)
+	txs, err := p.client.GetTransactions(ctx, PollBatchSize, nil, nil)
 	if err != nil {
 		p.logger.Error("Failed to fetch transactions", err)
 		p.handleError() // Exponential backoff (T103)

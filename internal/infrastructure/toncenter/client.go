@@ -82,9 +82,9 @@ func (t *Transaction) Lt() string {
 
 // GetTransactions retrieves transactions for the contract starting from a specific block.
 // Uses circuit breaker to prevent cascading failures.
-func (c *Client) GetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
+func (c *Client) GetTransactions(ctx context.Context, limit int, lt *uint64, hash *string) ([]Transaction, error) {
 	result, err := c.circuitBreaker.Execute(func() (interface{}, error) {
-		return c.doGetTransactions(ctx, fromBlock, limit)
+		return c.doGetTransactions(ctx, limit, lt, hash)
 	})
 
 	if err != nil {
@@ -95,7 +95,7 @@ func (c *Client) GetTransactions(ctx context.Context, fromBlock int64, limit int
 }
 
 // doGetTransactions performs the actual HTTP request to TON Center API v2 (REST).
-func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit int) ([]Transaction, error) {
+func (c *Client) doGetTransactions(ctx context.Context, limit int, lt *uint64, hash *string) ([]Transaction, error) {
 	// TON Center API v2 uses REST format with /getTransactions endpoint
 	// The base URL should not include /api/v2/ as it's added here
 	// Note: We omit to_lt to fetch the latest transactions (TON API returns newest first)
@@ -105,6 +105,14 @@ func (c *Client) doGetTransactions(ctx context.Context, fromBlock int64, limit i
 		c.contractAddress,
 		limit,
 	)
+
+	if lt != nil {
+		url += fmt.Sprintf("&lt=%d", *lt)
+	}
+
+	if hash != nil {
+		url += fmt.Sprintf("&hash=%s", *hash)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
