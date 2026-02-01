@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/big"
 	"sort"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -175,15 +176,76 @@ func (p *Poller) poll(ctx context.Context) {
 		return n1.Cmp(n2) < 0 // ASC order (oldest first)
 	})
 
-	// Check for transaction gaps (US-002)
+	// US-003: Check for transaction gaps and recursively backfill
 	// If the oldest new transaction's previous lt is newer than our last processed lt,
 	// it means we missed some intermediate transactions.
 	if len(newTxs) > 0 && p.lastProcessedLt != "0" {
 		oldestTx := newTxs[0]
-		// Check if PrevTransLt is available and strictly greater than lastProcessedLt
-		if oldestTx.PrevTransLt != "" && compareLt(oldestTx.PrevTransLt, p.lastProcessedLt) {
-			p.logger.Warn("Gap Detected: Oldest fetched tx (lt=%s) prev_lt=%s is newer than lastProcessedLt=%s",
-				oldestTx.Lt(), oldestTx.PrevTransLt, p.lastProcessedLt)
+
+		// Loop to fetch older pages until we bridge the gap to lastProcessedLt
+		for oldestTx.PrevTransLt != "" && oldestTx.PrevTransLt != "0" && compareLt(oldestTx.PrevTransLt, p.lastProcessedLt) {
+			p.logger.Info("Gap Detected: Backfilling from lt=%s hash=%s (target > %s)",
+				oldestTx.PrevTransLt, oldestTx.PrevTransHash, p.lastProcessedLt)
+
+			// Parse prev lt to uint64 for the client
+			prevLt, err := strconv.ParseUint(oldestTx.PrevTransLt, 10, 64)
+			if err != nil {
+				p.logger.Error("Failed to parse prev lt %s: %v", oldestTx.PrevTransLt, err)
+				break // Cannot continue backfilling
+			}
+			prevHash := oldestTx.PrevTransHash
+
+			// Fetch previous batch using the oldest transaction's previous link
+			backfilledTxs, err := p.client.GetTransactions(ctx, PollBatchSize, &prevLt, &prevHash)
+			if err != nil {
+				p.logger.Error("Failed to backfill transactions: %v", err)
+				// If backfill fails, we stop processing to avoid skipping transactions.
+				// We'll retry on the next poll cycle.
+				p.handleError()
+				return
+			}
+
+			if len(backfilledTxs) == 0 {
+				p.logger.Warn("Backfill returned empty batch, stopping recursion")
+				break
+			}
+
+			// Add valid transactions to our list
+			// We only keep transactions > lastProcessedLt
+			addedCount := 0
+			for _, tx := range backfilledTxs {
+				if compareLt(tx.Lt(), p.lastProcessedLt) {
+					newTxs = append(newTxs, tx)
+					addedCount++
+				}
+			}
+
+			if addedCount == 0 {
+				// All fetched transactions are <= lastProcessedLt, we are done
+				break
+			}
+
+			// Deduplicate transactions
+			uniqueTxs := make(map[string]Transaction)
+			for _, tx := range newTxs {
+				uniqueTxs[tx.Lt()] = tx
+			}
+			newTxs = make([]Transaction, 0, len(uniqueTxs))
+			for _, tx := range uniqueTxs {
+				newTxs = append(newTxs, tx)
+			}
+
+			// Re-sort to find the new oldest transaction
+			sort.Slice(newTxs, func(i, j int) bool {
+				n1 := new(big.Int)
+				n2 := new(big.Int)
+				n1.SetString(newTxs[i].Lt(), 10)
+				n2.SetString(newTxs[j].Lt(), 10)
+				return n1.Cmp(n2) < 0 // ASC order (oldest first)
+			})
+
+			// Update oldestTx for next iteration
+			oldestTx = newTxs[0]
 		}
 	}
 

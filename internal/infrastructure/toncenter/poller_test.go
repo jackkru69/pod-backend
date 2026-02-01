@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,49 +47,75 @@ func (m *MockLogger) log(level string, message interface{}, args ...interface{})
 }
 
 // MockEventHandler implements EventHandler
-type MockEventHandler struct{}
+type MockEventHandler struct {
+	HandledTxs []Transaction
+}
 
 func (m *MockEventHandler) HandleTransaction(ctx context.Context, tx Transaction) error {
+	m.HandledTxs = append(m.HandledTxs, tx)
 	return nil
 }
 
-func TestPoller_Poll_GapDetection(t *testing.T) {
-	// Setup mock server returning transactions with a gap
-	// lastProcessedLt = 100
-	// Txs: [ {lt: 300, prev_lt: 200}, {lt: 200, prev_lt: 150} ]
-	// Sorted: 200 (prev 150), 300 (prev 200)
-	// Gap: 150 > 100
+func TestPoller_Backfilling(t *testing.T) {
+	// Setup Mock Server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		lt := r.URL.Query().Get("lt")
+
+		var txs []Transaction
+
+		// Scenario: Last processed 50.
+		// Latest on chain: 200 -> 100 -> 75 -> 50.
+
+		if lt == "" {
+			// Initial fetch (latest)
+			txs = []Transaction{
+				{
+					TransactionID: struct {
+						Type string `json:"@type"`
+						Lt   string `json:"lt"`
+						Hash string `json:"hash"`
+					}{Type: "internal.transactionId", Lt: "200", Hash: "hash_200"},
+					PrevTransLt:   "100",
+					PrevTransHash: "hash_100",
+				},
+			}
+		} else if lt == "100" {
+			// Backfill 1
+			txs = []Transaction{
+				{
+					TransactionID: struct {
+						Type string `json:"@type"`
+						Lt   string `json:"lt"`
+						Hash string `json:"hash"`
+					}{Type: "internal.transactionId", Lt: "100", Hash: "hash_100"},
+					PrevTransLt:   "75",
+					PrevTransHash: "hash_75",
+				},
+			}
+		} else if lt == "75" {
+			// Backfill 2
+			txs = []Transaction{
+				{
+					TransactionID: struct {
+						Type string `json:"@type"`
+						Lt   string `json:"lt"`
+						Hash string `json:"hash"`
+					}{Type: "internal.transactionId", Lt: "75", Hash: "hash_75"},
+					PrevTransLt:   "50",
+					PrevTransHash: "hash_50",
+				},
+			}
+		} else {
+			// Older or other requests
+			txs = []Transaction{}
+		}
+
 		resp := struct {
 			OK     bool          `json:"ok"`
 			Result []Transaction `json:"result"`
 		}{
-			OK: true,
-			Result: []Transaction{
-				{
-					TransactionID: struct {
-						Type string `json:"@type"`
-						Lt   string `json:"lt"`
-						Hash string `json:"hash"`
-					}{
-						Lt:   "300",
-						Hash: "hash300",
-					},
-					PrevTransLt: "200",
-				},
-				{
-					TransactionID: struct {
-						Type string `json:"@type"`
-						Lt   string `json:"lt"`
-						Hash string `json:"hash"`
-					}{
-						Lt:   "200",
-						Hash: "hash200",
-					},
-					PrevTransLt: "150",
-				},
-			},
+			OK:     true,
+			Result: txs,
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
@@ -96,7 +123,7 @@ func TestPoller_Poll_GapDetection(t *testing.T) {
 
 	cfg := ClientConfig{
 		V2BaseURL:             server.URL,
-		ContractAddress:       "EQD...",
+		ContractAddress:       "addr",
 		CircuitBreakerMaxFail: 5,
 		CircuitBreakerTimeout: 1 * time.Second,
 		HTTPTimeout:           1 * time.Second,
@@ -106,27 +133,33 @@ func TestPoller_Poll_GapDetection(t *testing.T) {
 	handler := &MockEventHandler{}
 
 	poller := NewPoller(client, handler, mockLogger, 0)
-	poller.lastProcessedLt = "100"
-	poller.ticker = time.NewTicker(time.Hour) // Initialize ticker to avoid panic in adjustInterval
+	poller.lastProcessedLt = "50"
+	poller.ticker = time.NewTicker(time.Hour)
 
-	// Run poll directly
 	poller.poll(context.Background())
 
-	// Check logs for warning
-	foundGapWarning := false
+	// Verify HandledTxs
+	// Order should be 75, 100, 200 (Oldest First)
+	assert.Equal(t, 3, len(handler.HandledTxs))
+	if len(handler.HandledTxs) == 3 {
+		assert.Equal(t, "75", handler.HandledTxs[0].Lt())
+		assert.Equal(t, "100", handler.HandledTxs[1].Lt())
+		assert.Equal(t, "200", handler.HandledTxs[2].Lt())
+	}
+
+	// Verify logs contain "Backfilling"
+	foundBackfill := false
 	for _, log := range mockLogger.Logs {
-		if contains(log, "Gap Detected") {
-			foundGapWarning = true
+		if strings.Contains(log, "Backfilling") {
+			foundBackfill = true
 			break
 		}
 	}
-	assert.True(t, foundGapWarning, "Expected 'Gap Detected' warning in logs")
+	assert.True(t, foundBackfill, "Expected backfilling log")
 }
 
 func TestPoller_Poll_NoGap(t *testing.T) {
 	// Setup mock server returning transactions WITHOUT a gap
-	// lastProcessedLt = 100
-	// Txs: [ {lt: 200, prev_lt: 100} ]
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		resp := struct {
@@ -165,22 +198,17 @@ func TestPoller_Poll_NoGap(t *testing.T) {
 
 	poller := NewPoller(client, handler, mockLogger, 0)
 	poller.lastProcessedLt = "100"
-	poller.ticker = time.NewTicker(time.Hour) // Initialize ticker to avoid panic in adjustInterval
+	poller.ticker = time.NewTicker(time.Hour)
 
-	// Run poll directly
 	poller.poll(context.Background())
 
-	// Check logs for NO warning
-	foundGapWarning := false
+	// Check logs for NO backfilling warning
+	foundBackfill := false
 	for _, log := range mockLogger.Logs {
-		if contains(log, "Gap Detected") {
-			foundGapWarning = true
+		if strings.Contains(log, "Backfilling") {
+			foundBackfill = true
 			break
 		}
 	}
-	assert.False(t, foundGapWarning, "Did not expect 'Gap Detected' warning in logs")
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && s[0:len(substr)] == substr || (len(s) > len(substr) && contains(s[1:], substr))
+	assert.False(t, foundBackfill, "Did not expect backfilling log")
 }
