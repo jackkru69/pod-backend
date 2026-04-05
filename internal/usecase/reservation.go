@@ -2,11 +2,13 @@ package usecase
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
-
+	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/repository"
@@ -93,6 +95,8 @@ func (uc *ReservationUseCase) SetMetrics(m *metrics.ReservationMetrics) {
 // - Wallet owns the game (ErrCannotReserveOwnGame)
 // - Game is not in waiting_for_opponent status (ErrGameNotAvailable)
 func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletAddress string) (*entity.GameReservation, error) {
+	normalizedWalletAddress := normalizeReservationWallet(walletAddress)
+
 	// First, check game existence and status (outside lock to avoid holding lock during DB call)
 	game, err := uc.gameRepo.GetByID(ctx, gameID)
 	if err != nil {
@@ -108,7 +112,7 @@ func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletA
 	}
 
 	// Check if player owns the game (FR-011)
-	if game.PlayerOneAddress == walletAddress {
+	if sameReservationWallet(game.PlayerOneAddress, normalizedWalletAddress) {
 		return nil, entity.ErrCannotReserveOwnGame
 	}
 
@@ -122,7 +126,7 @@ func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletA
 	}
 
 	// Check wallet reservation limit (FR-010)
-	walletGameIDs := uc.walletReservations[walletAddress]
+	walletGameIDs := uc.walletReservations[normalizedWalletAddress]
 	activeCount := 0
 	for _, gid := range walletGameIDs {
 		if res, ok := uc.reservations[gid]; ok && res.IsActive() {
@@ -148,7 +152,7 @@ func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletA
 	uc.reservations[gameID] = reservation
 
 	// Update wallet index
-	uc.walletReservations[walletAddress] = append(uc.walletReservations[walletAddress], gameID)
+	uc.walletReservations[normalizedWalletAddress] = append(uc.walletReservations[normalizedWalletAddress], gameID)
 
 	// Release lock before broadcasting (to avoid deadlock)
 	uc.mu.Unlock()
@@ -176,9 +180,8 @@ func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletA
 // GetReservation returns the current reservation for a game, if any
 func (uc *ReservationUseCase) GetReservation(ctx context.Context, gameID int64) (*entity.GameReservation, error) {
 	uc.mu.RLock()
-	defer uc.mu.RUnlock()
-
 	reservation, ok := uc.reservations[gameID]
+	uc.mu.RUnlock()
 	if !ok {
 		return nil, nil // No reservation exists
 	}
@@ -194,16 +197,34 @@ func (uc *ReservationUseCase) GetReservation(ctx context.Context, gameID int64) 
 // ListByWallet returns all active reservations for a wallet
 func (uc *ReservationUseCase) ListByWallet(ctx context.Context, walletAddress string) ([]*entity.GameReservation, error) {
 	uc.mu.RLock()
-	defer uc.mu.RUnlock()
-
-	gameIDs := uc.walletReservations[walletAddress]
-	result := make([]*entity.GameReservation, 0, len(gameIDs))
+	gameIDs := uc.walletReservations[normalizeReservationWallet(walletAddress)]
+	reservations := make([]*entity.GameReservation, 0, len(gameIDs))
 
 	for _, gameID := range gameIDs {
 		if res, ok := uc.reservations[gameID]; ok && res.IsActive() {
-			result = append(result, res)
+			reservations = append(reservations, res)
 		}
 	}
+	uc.mu.RUnlock()
+
+	result := make([]*entity.GameReservation, 0, len(reservations))
+	for _, reservation := range reservations {
+		isAvailable, err := uc.isReservationGameAvailable(ctx, reservation.GameID)
+		if err != nil {
+			return nil, err
+		}
+
+		if !isAvailable {
+			uc.releaseStaleReservation(reservation.GameID)
+			continue
+		}
+
+		result = append(result, reservation)
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
 
 	return result, nil
 }
@@ -211,6 +232,7 @@ func (uc *ReservationUseCase) ListByWallet(ctx context.Context, walletAddress st
 // Cancel releases a reservation.
 // Only the reservation holder can cancel.
 func (uc *ReservationUseCase) Cancel(ctx context.Context, gameID int64, walletAddress string) error {
+	normalizedWalletAddress := normalizeReservationWallet(walletAddress)
 	uc.mu.Lock()
 
 	reservation, ok := uc.reservations[gameID]
@@ -220,14 +242,14 @@ func (uc *ReservationUseCase) Cancel(ctx context.Context, gameID int64, walletAd
 	}
 
 	// Check ownership
-	if reservation.WalletAddress != walletAddress {
+	if !sameReservationWallet(reservation.WalletAddress, normalizedWalletAddress) {
 		uc.mu.Unlock()
 		return entity.ErrNotReservationHolder
 	}
 
 	// Release reservation
 	reservation.Status = entity.ReservationStatusReleased
-	uc.removeFromWalletIndex(walletAddress, gameID)
+	uc.removeFromWalletIndex(reservation.WalletAddress, gameID)
 
 	// Release lock before broadcasting (T043)
 	uc.mu.Unlock()
@@ -379,17 +401,70 @@ func (uc *ReservationUseCase) CleanupExpired(ctx context.Context) {
 // removeFromWalletIndex removes a gameID from the wallet's reservation list
 // Must be called with lock held
 func (uc *ReservationUseCase) removeFromWalletIndex(walletAddress string, gameID int64) {
-	gameIDs := uc.walletReservations[walletAddress]
+	walletKey := normalizeReservationWallet(walletAddress)
+	gameIDs := uc.walletReservations[walletKey]
 	for i, gid := range gameIDs {
 		if gid == gameID {
-			uc.walletReservations[walletAddress] = append(gameIDs[:i], gameIDs[i+1:]...)
+			uc.walletReservations[walletKey] = append(gameIDs[:i], gameIDs[i+1:]...)
 			break
 		}
 	}
 	// Clean up empty wallet entries
-	if len(uc.walletReservations[walletAddress]) == 0 {
-		delete(uc.walletReservations, walletAddress)
+	if len(uc.walletReservations[walletKey]) == 0 {
+		delete(uc.walletReservations, walletKey)
 	}
+}
+
+func (uc *ReservationUseCase) isReservationGameAvailable(ctx context.Context, gameID int64) (bool, error) {
+	if uc.gameRepo == nil {
+		return true, nil
+	}
+
+	game, err := uc.gameRepo.GetByID(ctx, gameID)
+	if err != nil {
+		return false, err
+	}
+	if game == nil {
+		return false, nil
+	}
+
+	return game.Status == entity.GameStatusWaitingForOpponent, nil
+}
+
+func (uc *ReservationUseCase) releaseStaleReservation(gameID int64) {
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+
+	reservation, ok := uc.reservations[gameID]
+	if !ok {
+		return
+	}
+
+	reservation.Status = entity.ReservationStatusReleased
+	uc.removeFromWalletIndex(reservation.WalletAddress, gameID)
+	delete(uc.reservations, gameID)
+}
+
+func normalizeReservationWallet(walletAddress string) string {
+	trimmedWalletAddress := strings.TrimSpace(walletAddress)
+	if trimmedWalletAddress == "" {
+		return ""
+	}
+
+	parsedWalletAddress, err := address.ParseAddr(trimmedWalletAddress)
+	if err != nil {
+		return strings.ToLower(trimmedWalletAddress)
+	}
+
+	return parsedWalletAddress.StringRaw()
+}
+
+func sameReservationWallet(walletAddress string, normalizedWalletAddress string) bool {
+	if normalizedWalletAddress == "" {
+		return normalizeReservationWallet(walletAddress) == ""
+	}
+
+	return normalizeReservationWallet(walletAddress) == normalizedWalletAddress
 }
 
 // GetActiveCount returns the number of active reservations (for metrics)

@@ -47,10 +47,17 @@ type DeadLetterQueueRepository interface {
 
 // DLQStats contains statistics about the dead letter queue.
 type DLQStats struct {
-	PendingCount  int64      `json:"pending_count"`
-	RetryingCount int64      `json:"retrying_count"`
-	ResolvedCount int64      `json:"resolved_count"`
-	FailedCount   int64      `json:"failed_count"`
-	TotalCount    int64      `json:"total_count"`
-	OldestPending *time.Time `json:"oldest_pending,omitempty"`
+	PendingCount          int64      `json:"pending_count"`
+	RetryingCount         int64      `json:"retrying_count"`
+	ResolvedCount         int64      `json:"resolved_count"`
+	FailedCount           int64      `json:"failed_count"`
+	TotalCount            int64      `json:"total_count"`
+	ParseErrorCount       int64      `json:"parse_error_count"`
+	PersistenceErrorCount int64      `json:"persistence_error_count"`
+	ValidationErrorCount  int64      `json:"validation_error_count"`
+	UnknownErrorCount     int64      `json:"unknown_error_count"`
+	ReadyForRetryCount    int64      `json:"ready_for_retry_count"`
+	ExhaustedRetryCount   int64      `json:"exhausted_retry_count"`
+	OldestPending         *time.Time `json:"oldest_pending,omitempty"`
+	NextScheduledRetryAt  *time.Time `json:"next_scheduled_retry_at,omitempty"`
 }

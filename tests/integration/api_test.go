@@ -14,7 +14,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"pod-backend/config"
 	httpRouter "pod-backend/internal/controller/http"
 	"pod-backend/internal/entity"
@@ -535,9 +534,171 @@ func TestUserProfile(t *testing.T) {
 
 		assert.Equal(t, testUser.WalletAddress, user.WalletAddress)
 		assert.Equal(t, testUser.TelegramUsername, user.TelegramUsername)
-		assert.Equal(t, 10, user.TotalGamesPlayed)
-		assert.Equal(t, 6, user.TotalWins)
-		assert.Equal(t, 4, user.TotalLosses)
+		assert.Equal(t, 0, user.TotalGamesPlayed)
+		assert.Equal(t, 0, user.TotalWins)
+		assert.Equal(t, 0, user.TotalLosses)
+	})
+
+	t.Run("should derive profile counters from indexed games instead of stale user totals", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		playerTwoAddress := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		playerThreeAddress := "EQBL8Ww6LLn6lYI6YJ6xntrENcGukdxbYlR5cYsEMFihZlyV"
+		referrerAddress := "EQAFmK79N5h8nDgAbA1AZt0pOEtpJR-YWZLxE-nobVhtSGcM"
+		now := time.Now()
+		playerTwoChoice := entity.CoinSideTails
+		winnerAddress := walletAddress
+		otherWinnerAddress := playerThreeAddress
+		drawPayout := int64(0)
+		firstCompletedAt := now.Add(-3 * time.Hour)
+		secondCompletedAt := now.Add(-90 * time.Minute)
+		drawCompletedAt := now.Add(-60 * time.Minute)
+		cancelledCompletedAt := now.Add(-45 * time.Minute)
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:        Int64Ptr(123456789),
+				TelegramUsername:      "testuser",
+				WalletAddress:         walletAddress,
+				TotalGamesPlayed:      99,
+				TotalWins:             98,
+				TotalLosses:           97,
+				TotalReferrals:        96,
+				TotalReferralEarnings: 500000000,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "playertwo",
+				WalletAddress:    playerTwoAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(111222333),
+				TelegramUsername: "playerthree",
+				WalletAddress:    playerThreeAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(444555666),
+				TelegramUsername: "referrer",
+				WalletAddress:    referrerAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		for _, game := range []*entity.Game{
+			{
+				GameID:                1,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      walletAddress,
+				PlayerTwoAddress:      &playerTwoAddress,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				PlayerOneReferrer:     &referrerAddress,
+				BetAmount:             1000000000,
+				WinnerAddress:         &winnerAddress,
+				PayoutAmount:          Int64Ptr(1900000000),
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    playerThreeAddress,
+				CreatedAt:             now.Add(-4 * time.Hour),
+				CompletedAt:           &firstCompletedAt,
+				InitTxHash:            "profile-derived-1",
+			},
+			{
+				GameID:                2,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      playerThreeAddress,
+				PlayerTwoAddress:      &walletAddress,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				BetAmount:             1000000000,
+				WinnerAddress:         &otherWinnerAddress,
+				PayoutAmount:          Int64Ptr(1900000000),
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    playerTwoAddress,
+				CreatedAt:             now.Add(-2 * time.Hour),
+				CompletedAt:           &secondCompletedAt,
+				InitTxHash:            "profile-derived-2",
+			},
+			{
+				GameID:                3,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      walletAddress,
+				PlayerTwoAddress:      &playerThreeAddress,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				BetAmount:             1000000000,
+				WinnerAddress:         nil,
+				PayoutAmount:          &drawPayout,
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    playerTwoAddress,
+				CreatedAt:             now.Add(-70 * time.Minute),
+				CompletedAt:           &drawCompletedAt,
+				InitTxHash:            "profile-derived-3",
+			},
+			{
+				GameID:                4,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      walletAddress,
+				PlayerTwoAddress:      &playerTwoAddress,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				BetAmount:             1000000000,
+				WinnerAddress:         nil,
+				PayoutAmount:          nil,
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    playerThreeAddress,
+				CreatedAt:             now.Add(-50 * time.Minute),
+				CompletedAt:           &cancelledCompletedAt,
+				InitTxHash:            "profile-derived-4",
+			},
+		} {
+			seedGame(t, game)
+		}
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/users/%s", walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var user entity.User
+		err = json.Unmarshal(body, &user)
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, user.TotalGamesPlayed)
+		assert.Equal(t, 1, user.TotalWins)
+		assert.Equal(t, 1, user.TotalLosses)
+		assert.Equal(t, 0, user.TotalReferrals)
+		assert.Equal(t, int64(500000000), user.TotalReferralEarnings)
 	})
 
 	t.Run("should return 404 when user not found", func(t *testing.T) {
@@ -624,9 +785,11 @@ func TestUserGameHistory(t *testing.T) {
 		assert.Contains(t, result, "wallet_address")
 		assert.Contains(t, result, "limit")
 		assert.Contains(t, result, "offset")
+		assert.Contains(t, result, "total")
 		assert.Equal(t, walletAddress, result["wallet_address"])
 		assert.Equal(t, float64(2), result["limit"])
 		assert.Equal(t, float64(1), result["offset"])
+		assert.Equal(t, float64(5), result["total"])
 
 		games := result["games"].([]interface{})
 		assert.LessOrEqual(t, len(games), 2) // Should respect limit
@@ -669,6 +832,48 @@ func TestUserReferralStats(t *testing.T) {
 		}
 		seedUser(t, testUser)
 
+		referredWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		opponentWallet := "EQBL8Ww6LLn6lYI6YJ6xntrENcGukdxbYlR5cYsEMFihZlyV"
+		now := time.Now()
+		playerTwoChoice := entity.CoinSideTails
+		payout := int64(1900000000)
+		completedAt := now.Add(-30 * time.Minute)
+
+		seedUser(t, &entity.User{
+			TelegramUserID:   Int64Ptr(987654321),
+			TelegramUsername: "referred",
+			WalletAddress:    referredWallet,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		seedUser(t, &entity.User{
+			TelegramUserID:   Int64Ptr(111222333),
+			TelegramUsername: "opponent",
+			WalletAddress:    opponentWallet,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		seedGame(t, &entity.Game{
+			GameID:                1,
+			Status:                entity.GameStatusPaid,
+			PlayerOneAddress:      referredWallet,
+			PlayerTwoAddress:      &opponentWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			PlayerTwoChoice:       &playerTwoChoice,
+			PlayerOneReferrer:     &walletAddress,
+			BetAmount:             1000000000,
+			PayoutAmount:          &payout,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    opponentWallet,
+			CreatedAt:             now.Add(-1 * time.Hour),
+			CompletedAt:           &completedAt,
+			InitTxHash:            "referral-stats-1",
+		})
+
 		// Act
 		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/users/%s/referrals", walletAddress), nil)
 		resp, err := app.Test(req)
@@ -684,7 +889,121 @@ func TestUserReferralStats(t *testing.T) {
 		err = json.Unmarshal(body, &stats)
 		require.NoError(t, err)
 
-		assert.Equal(t, int64(5), stats.TotalReferrals)
+		assert.Equal(t, int64(1), stats.TotalReferrals)
+		assert.Equal(t, int64(1), stats.GamesReferred)
+		assert.Equal(t, int64(500000000), stats.TotalReferralEarnings)
+	})
+
+	t.Run("should report unique referred wallets separately from referred games", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		referrerAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		referredOne := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		referredTwo := "EQBL8Ww6LLn6lYI6YJ6xntrENcGukdxbYlR5cYsEMFihZlyV"
+		opponentAddress := "EQAFmK79N5h8nDgAbA1AZt0pOEtpJR-YWZLxE-nobVhtSGcM"
+		now := time.Now()
+		playerTwoChoice := entity.CoinSideTails
+		payout := int64(1900000000)
+		firstCompletedAt := now.Add(-3 * time.Hour)
+		secondCompletedAt := now.Add(-90 * time.Minute)
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:        Int64Ptr(123456789),
+				TelegramUsername:      "referrer",
+				WalletAddress:         referrerAddress,
+				TotalReferrals:        999,
+				TotalReferralEarnings: 500000000,
+				CreatedAt:             now,
+				UpdatedAt:             now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "referredone",
+				WalletAddress:    referredOne,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(111222333),
+				TelegramUsername: "referredtwo",
+				WalletAddress:    referredTwo,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(444555666),
+				TelegramUsername: "opponent",
+				WalletAddress:    opponentAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		for _, game := range []*entity.Game{
+			{
+				GameID:                1,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      referredOne,
+				PlayerTwoAddress:      &opponentAddress,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				PlayerOneReferrer:     &referrerAddress,
+				BetAmount:             1000000000,
+				PayoutAmount:          &payout,
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    opponentAddress,
+				CreatedAt:             now.Add(-4 * time.Hour),
+				CompletedAt:           &firstCompletedAt,
+				InitTxHash:            "referral-derived-1",
+			},
+			{
+				GameID:                2,
+				Status:                entity.GameStatusPaid,
+				PlayerOneAddress:      referredOne,
+				PlayerTwoAddress:      &referredTwo,
+				PlayerOneChoice:       entity.CoinSideHeads,
+				PlayerTwoChoice:       &playerTwoChoice,
+				PlayerOneReferrer:     &referrerAddress,
+				PlayerTwoReferrer:     &referrerAddress,
+				BetAmount:             1000000000,
+				PayoutAmount:          &payout,
+				ServiceFeeNumerator:   100,
+				ReferrerFeeNumerator:  50,
+				WaitingTimeoutSeconds: 3600,
+				LowestBidAllowed:      100000000,
+				HighestBidAllowed:     10000000000,
+				FeeReceiverAddress:    opponentAddress,
+				CreatedAt:             now.Add(-2 * time.Hour),
+				CompletedAt:           &secondCompletedAt,
+				InitTxHash:            "referral-derived-2",
+			},
+		} {
+			seedGame(t, game)
+		}
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/users/%s/referrals", referrerAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var stats entity.ReferralStats
+		err = json.Unmarshal(body, &stats)
+		require.NoError(t, err)
+
+		assert.Equal(t, int64(2), stats.TotalReferrals)
+		assert.Equal(t, int64(2), stats.GamesReferred)
 		assert.Equal(t, int64(500000000), stats.TotalReferralEarnings)
 	})
 

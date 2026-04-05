@@ -66,6 +66,13 @@ type ParsedMessage struct {
 	RawData       []byte
 }
 
+// InMsgParser decodes TON Center in_msg payloads into structured game events.
+// Runtime code should obtain this through NewRuntimeMessageParser so there is
+// only one authoritative parser path in production.
+type InMsgParser interface {
+	ParseInMsg(inMsgJSON json.RawMessage) (*ParsedMessage, error)
+}
+
 // InMsgData represents the in_msg structure from TON Center API.
 type InMsgData struct {
 	Type        string `json:"@type"`
@@ -80,12 +87,22 @@ type InMsgData struct {
 	Message string `json:"message"`
 }
 
-// MessageParser parses TON blockchain messages into structured events.
+// MessageParser parses TON blockchain messages using the legacy raw-byte
+// decoder. It is kept for compatibility and focused regression tests; runtime
+// code should use NewRuntimeMessageParser instead.
 type MessageParser struct{}
 
-// NewMessageParser creates a new TON message parser.
+var _ InMsgParser = (*MessageParser)(nil)
+
+// NewMessageParser creates the legacy compatibility parser.
 func NewMessageParser() *MessageParser {
 	return &MessageParser{}
+}
+
+// NewRuntimeMessageParser returns the single authoritative parser used by the
+// runtime transaction pipeline.
+func NewRuntimeMessageParser() InMsgParser {
+	return NewMessageParserV2()
 }
 
 // ParseInMsg parses the in_msg JSON from a transaction into a ParsedMessage.
@@ -144,9 +161,7 @@ func (p *MessageParser) ParseInMsg(inMsgJSON json.RawMessage) (*ParsedMessage, e
 	return p.parseMessageByOpcode(opcode, messageData[4:], messageData)
 }
 
-// parseLegacyJSON handles the legacy JSON format used in tests.
-// Expected format: {"event_type": "...", "game_id": 123, ...}
-func (p *MessageParser) parseLegacyJSON(inMsgJSON json.RawMessage) (*ParsedMessage, error) {
+func parseLegacyParsedMessage(inMsgJSON json.RawMessage) (*ParsedMessage, error) {
 	var data map[string]interface{}
 	if err := json.Unmarshal(inMsgJSON, &data); err != nil {
 		return nil, fmt.Errorf("failed to parse legacy JSON: %w", err)
@@ -167,21 +182,16 @@ func (p *MessageParser) parseLegacyJSON(inMsgJSON json.RawMessage) (*ParsedMessa
 		GameID:    int64(gameIDFloat),
 	}
 
-	// Extract optional fields
-	if playerOne, ok := data["player_one"].(string); ok {
-		msg.PlayerOne = playerOne
-	}
-	if playerTwo, ok := data["player_two"].(string); ok {
-		msg.PlayerTwo = playerTwo
-	}
-	if winner, ok := data["winner"].(string); ok {
-		msg.Winner = winner
-	}
-	if looser, ok := data["looser"].(string); ok {
-		msg.Looser = looser
-	}
-	if player, ok := data["player"].(string); ok {
-		msg.Player = player
+	for key, target := range map[string]*string{
+		"player_one": &msg.PlayerOne,
+		"player_two": &msg.PlayerTwo,
+		"winner":     &msg.Winner,
+		"looser":     &msg.Looser,
+		"player":     &msg.Player,
+	} {
+		if value, ok := data[key].(string); ok {
+			*target = value
+		}
 	}
 	if betAmount, ok := data["bet_amount"].(string); ok {
 		msg.BidValue, _ = new(big.Int).SetString(betAmount, 10)
@@ -191,6 +201,12 @@ func (p *MessageParser) parseLegacyJSON(inMsgJSON json.RawMessage) (*ParsedMessa
 	}
 
 	return msg, nil
+}
+
+// parseLegacyJSON handles the legacy JSON format used in tests.
+// Expected format: {"event_type": "...", "game_id": 123, ...}.
+func (p *MessageParser) parseLegacyJSON(inMsgJSON json.RawMessage) (*ParsedMessage, error) {
+	return parseLegacyParsedMessage(inMsgJSON)
 }
 
 // parseMessageByOpcode parses message data based on the opcode.

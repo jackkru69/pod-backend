@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -11,8 +12,9 @@ import (
 	"github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
+	wscontroller "pod-backend/internal/controller/websocket"
 	"pod-backend/internal/entity"
+	postgresrepo "pod-backend/internal/repository/postgres"
 )
 
 // TestWebSocketUpgrade tests WebSocket connection upgrade (T054)
@@ -25,7 +27,7 @@ func TestWebSocketUpgrade(t *testing.T) {
 
 	t.Run("should reject non-WebSocket requests", func(t *testing.T) {
 		// Arrange
-		app := setupTestApp(t)
+		app := setupWebSocketUpgradeValidationApp(t)
 		defer cleanupTestDB(t)
 
 		// Act - make regular HTTP request to WebSocket endpoint
@@ -39,7 +41,7 @@ func TestWebSocketUpgrade(t *testing.T) {
 
 	t.Run("should validate game ID parameter", func(t *testing.T) {
 		// Arrange
-		app := setupTestApp(t)
+		app := setupWebSocketUpgradeValidationApp(t)
 		defer cleanupTestDB(t)
 
 		// Act - invalid game ID
@@ -58,7 +60,7 @@ func TestWebSocketUpgrade(t *testing.T) {
 
 	t.Run("should handle game not found", func(t *testing.T) {
 		// Arrange
-		app := setupTestApp(t)
+		app := setupWebSocketUpgradeValidationApp(t)
 		defer cleanupTestDB(t)
 
 		// Act - non-existent game
@@ -72,10 +74,35 @@ func TestWebSocketUpgrade(t *testing.T) {
 
 		// Assert
 		require.NoError(t, err)
-		// WebSocket upgrade may succeed but connection should be closed if game doesn't exist
-		// or it should return 404
-		assert.Contains(t, []int{fiber.StatusNotFound, fiber.StatusSwitchingProtocols}, resp.StatusCode)
+		assert.Equal(t, fiber.StatusNotFound, resp.StatusCode, "should return 404 when the game does not exist")
 	})
+}
+
+func setupWebSocketUpgradeValidationApp(t *testing.T) *fiber.App {
+	t.Helper()
+
+	testDB = setupTestDatabase(t)
+
+	app := fiber.New(fiber.Config{
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			var fiberErr *fiber.Error
+			if errors.As(err, &fiberErr) {
+				return c.Status(fiberErr.Code).JSON(fiber.Map{
+					"error": fiberErr.Message,
+				})
+			}
+
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": err.Error(),
+			})
+		},
+	})
+
+	gameRepo := postgresrepo.NewGameRepository(testDB.pg)
+	handler := wscontroller.NewGameWebSocketHandler(gameRepo, nil)
+	app.Get("/ws/games/:gameId", handler.UpgradeCheck)
+
+	return app
 }
 
 // mockWebSocketClient simulates a WebSocket client for testing

@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-
 	"pod-backend/internal/entity"
 	"pod-backend/pkg/postgres"
 	"pod-backend/tests/testdata"
@@ -160,7 +159,6 @@ func (h *TestHelper) SeedUser(t *testing.T, user *entity.User) {
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
-
 	if err != nil {
 		t.Fatalf("Failed to seed user: %v", err)
 	}
@@ -175,14 +173,14 @@ func (h *TestHelper) SeedGame(t *testing.T, game *entity.Game) {
 	query := `
 		INSERT INTO games (
 			game_id, status, player_one_address, player_two_address,
-			player_one_choice, player_two_choice,
+			player_one_choice, player_two_choice, player_one_referrer, player_two_referrer,
 			bet_amount, winner_address, payout_amount,
 			service_fee_numerator, referrer_fee_numerator,
 			waiting_timeout_seconds, lowest_bid_allowed, highest_bid_allowed,
 			fee_receiver_address,
 			created_at, joined_at, revealed_at, completed_at,
 			init_tx_hash, join_tx_hash, reveal_tx_hash, complete_tx_hash
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		ON CONFLICT (game_id) DO NOTHING
 	`
 
@@ -193,6 +191,8 @@ func (h *TestHelper) SeedGame(t *testing.T, game *entity.Game) {
 		game.PlayerTwoAddress,
 		game.PlayerOneChoice,
 		game.PlayerTwoChoice,
+		game.PlayerOneReferrer,
+		game.PlayerTwoReferrer,
 		game.BetAmount,
 		game.WinnerAddress,
 		game.PayoutAmount,
@@ -211,7 +211,6 @@ func (h *TestHelper) SeedGame(t *testing.T, game *entity.Game) {
 		game.RevealTxHash,
 		game.CompleteTxHash,
 	)
-
 	if err != nil {
 		t.Fatalf("Failed to seed game: %v", err)
 	}
@@ -239,7 +238,6 @@ func (h *TestHelper) SeedGameEvent(t *testing.T, event *entity.GameEvent) {
 		event.Payload,
 		event.CreatedAt,
 	)
-
 	if err != nil {
 		t.Fatalf("Failed to seed game event: %v", err)
 	}
@@ -327,7 +325,6 @@ func (h *TestHelper) GetGameByID(t *testing.T, gameID int64) *entity.Game {
 		&game.RevealTxHash,
 		&game.CompleteTxHash,
 	)
-
 	if err != nil {
 		t.Fatalf("Failed to get game %d: %v", gameID, err)
 	}

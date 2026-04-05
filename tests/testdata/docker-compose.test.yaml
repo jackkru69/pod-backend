@@ -72,7 +72,7 @@ services:
       LOG_LEVEL: "debug"
 
       # TON Blockchain (mock)
-      TON_CENTER_V2_URL: "http://mock-toncenter:8082"
+      TON_CENTER_V2_URL: "http://mock-toncenter:8082/api/v2"
       TON_GAME_CONTRACT_ADDRESS: "0:test_contract_address"
 
       # Circuit Breaker

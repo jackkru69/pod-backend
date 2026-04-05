@@ -21,6 +21,7 @@ type GamePersistenceUseCase struct {
 	userRepo    repository.UserRepository
 	txManager   repository.TxManager  // Optional: for transactional operations
 	broadcastUC *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
+	reserveUC   *ReservationUseCase   // Optional: nil when reservation lifecycle is not enabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -35,6 +36,7 @@ func NewGamePersistenceUseCase(
 		userRepo:    userRepo,
 		txManager:   nil, // Set via SetTxManager
 		broadcastUC: nil, // Set via SetBroadcastUseCase
+		reserveUC:   nil, // Set via SetReservationUseCase
 	}
 }
 
@@ -48,6 +50,12 @@ func (uc *GamePersistenceUseCase) SetTxManager(txManager repository.TxManager) {
 // This is optional - if not set, persistence works without broadcasting.
 func (uc *GamePersistenceUseCase) SetBroadcastUseCase(broadcastUC *GameBroadcastUseCase) {
 	uc.broadcastUC = broadcastUC
+}
+
+// SetReservationUseCase sets the reservation use case so blockchain joins can
+// consume active lobby reservations.
+func (uc *GamePersistenceUseCase) SetReservationUseCase(reservationUC *ReservationUseCase) {
+	uc.reserveUC = reservationUC
 }
 
 // extractInt64 extracts an int64 from event data, handling both int64 and float64 types.
@@ -169,7 +177,10 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 
 	// player_one_choice is optional - may not be present in GameInitializedNotify
 	// (in TON contract, the choice is hidden in the secret hash)
-	playerOneChoice, _ := extractInt64(event.EventData, "player_one_choice")
+	playerOneChoice := int64(entity.CoinSideClosed)
+	if parsedChoice, err := extractInt64(event.EventData, "player_one_choice"); err == nil {
+		playerOneChoice = parsedChoice
+	}
 
 	// Ensure player_one user exists (for FK constraint satisfaction)
 	// This creates a minimal "blockchain-only" user if they don't exist yet
@@ -182,7 +193,7 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		GameID:           gameID,
 		Status:           entity.GameStatusWaitingForOpponent,
 		PlayerOneAddress: playerOne,
-		PlayerOneChoice:  int(playerOneChoice), // Will be 0 if not present
+		PlayerOneChoice:  int(playerOneChoice),
 		BetAmount:        betAmount,
 		InitTxHash:       event.TransactionHash,
 		CreatedAt:        event.Timestamp,
@@ -271,8 +282,12 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 	}
 
 	// Update game with player 2 (FR-008)
-	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash); err != nil {
+	if err := uc.gameRepo.JoinGame(ctx, event.GameID, playerTwo, event.TransactionHash, event.Timestamp); err != nil {
 		return fmt.Errorf("failed to join game: %w", err)
+	}
+
+	if uc.reserveUC != nil {
+		uc.reserveUC.ReleaseOnJoin(ctx, event.GameID)
 	}
 
 	// Broadcast game update to WebSocket subscribers (T093)
@@ -311,8 +326,12 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		return fmt.Errorf("invalid event data: %w", err)
 	}
 
-	// Payout is optional, default to 0 if not provided
-	payout, _ := extractInt64(event.EventData, "payout")
+	// Runtime parser now supplies total_gainings from the contract event; keep the
+	// legacy payout key as a fallback for older fixtures/tests.
+	payout, err := extractInt64(event.EventData, "total_gainings")
+	if err != nil {
+		payout, _ = extractInt64(event.EventData, "payout")
+	}
 
 	// Determine loser before transaction
 	var loser string
@@ -352,7 +371,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 			}
 
 			// Complete game (FR-012)
-			if err := uc.gameRepo.CompleteGameWithQuerier(ctx, tx, event.GameID, winner, payout, event.TransactionHash); err != nil {
+			if err := uc.gameRepo.CompleteGameWithQuerier(ctx, tx, event.GameID, winner, payout, event.TransactionHash, event.Timestamp); err != nil {
 				return fmt.Errorf("failed to complete game: %w", err)
 			}
 
@@ -402,7 +421,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		}
 
 		// Complete game (FR-012)
-		if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash); err != nil {
+		if err := uc.gameRepo.CompleteGame(ctx, event.GameID, winner, payout, event.TransactionHash, event.Timestamp); err != nil {
 			return fmt.Errorf("failed to complete game: %w", err)
 		}
 
@@ -477,7 +496,7 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 	}
 
 	// Complete game with no winner (FR-012)
-	if err := uc.gameRepo.CompleteGame(ctx, event.GameID, "", 0, event.TransactionHash); err != nil {
+	if err := uc.gameRepo.CompleteGame(ctx, event.GameID, "", 0, event.TransactionHash, event.Timestamp); err != nil {
 		return fmt.Errorf("failed to complete game (draw): %w", err)
 	}
 
@@ -540,7 +559,7 @@ func (uc *GamePersistenceUseCase) HandleGameCancelled(ctx context.Context, event
 	}
 
 	// Cancel game
-	if err := uc.gameRepo.CancelGame(ctx, event.GameID, event.TransactionHash); err != nil {
+	if err := uc.gameRepo.CancelGame(ctx, event.GameID, event.TransactionHash, event.Timestamp); err != nil {
 		return fmt.Errorf("failed to cancel game: %w", err)
 	}
 
@@ -596,7 +615,7 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 	}
 
 	// Update game with revealed choice
-	if err := uc.gameRepo.RevealChoice(ctx, event.GameID, playerAddress, int(coinSide), event.TransactionHash); err != nil {
+	if err := uc.gameRepo.RevealChoice(ctx, event.GameID, playerAddress, int(coinSide), event.TransactionHash, event.Timestamp); err != nil {
 		return fmt.Errorf("failed to reveal choice: %w", err)
 	}
 

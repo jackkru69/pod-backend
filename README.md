@@ -83,9 +83,16 @@ For host-run development, the compose stack exposes:
 ### 3. Run the backend
 
 ```bash
+set -a
+. ./.env
+set +a
 go mod download
 go run cmd/app/main.go
 ```
+
+`go run cmd/app/main.go` reads from exported environment variables, so load
+`.env` into your shell first as shown above. If you prefer the Makefile-managed
+environment plus Swagger/proto generation, use `make run`.
 
 For a fuller dev flow that also regenerates Swagger/proto artifacts, you can
 use:
@@ -139,7 +146,7 @@ RMQ_URL=amqp://guest:guest@localhost:5672/
 NATS_URL=nats://guest:guest@localhost:4223/
 
 # TON / gameplay
-TON_CENTER_V2_URL=http://localhost:8082
+TON_CENTER_V2_URL=http://localhost:8082/api/v2
 TON_CENTER_V3_WS_URL=ws://localhost:8081/api/v3/websocket
 TON_GAME_CONTRACT_ADDRESS=EQD...replace_with_same_address_as_frontend
 TELEGRAM_BOT_TOKEN=your_bot_token_here

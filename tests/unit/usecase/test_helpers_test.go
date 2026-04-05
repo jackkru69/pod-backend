@@ -2,11 +2,11 @@ package usecase_test
 
 import (
 	"context"
-
-	"pod-backend/internal/entity"
-	"pod-backend/internal/repository"
+	"time"
 
 	"github.com/stretchr/testify/mock"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/repository"
 )
 
 // Shared test mocks for all usecase tests
@@ -67,23 +67,23 @@ func (m *MockGameRepository) UpdateStatus(ctx context.Context, gameID int64, sta
 	return args.Error(0)
 }
 
-func (m *MockGameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string) error {
-	args := m.Called(ctx, gameID, playerTwoAddress, joinTxHash)
+func (m *MockGameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string, joinedAt time.Time) error {
+	args := m.Called(ctx, gameID, playerTwoAddress, joinTxHash, joinedAt)
 	return args.Error(0)
 }
 
-func (m *MockGameRepository) CompleteGame(ctx context.Context, gameID int64, winner string, payout int64, finishTxHash string) error {
-	args := m.Called(ctx, gameID, winner, payout, finishTxHash)
+func (m *MockGameRepository) CompleteGame(ctx context.Context, gameID int64, winner string, payout int64, finishTxHash string, completedAt time.Time) error {
+	args := m.Called(ctx, gameID, winner, payout, finishTxHash, completedAt)
 	return args.Error(0)
 }
 
-func (m *MockGameRepository) CancelGame(ctx context.Context, gameID int64, cancelTxHash string) error {
-	args := m.Called(ctx, gameID, cancelTxHash)
+func (m *MockGameRepository) CancelGame(ctx context.Context, gameID int64, cancelTxHash string, completedAt time.Time) error {
+	args := m.Called(ctx, gameID, cancelTxHash, completedAt)
 	return args.Error(0)
 }
 
-func (m *MockGameRepository) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string) error {
-	args := m.Called(ctx, gameID, playerAddress, choice, revealTxHash)
+func (m *MockGameRepository) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string, revealedAt time.Time) error {
+	args := m.Called(ctx, gameID, playerAddress, choice, revealTxHash, revealedAt)
 	return args.Error(0)
 }
 
@@ -102,8 +102,8 @@ func (m *MockGameRepository) CreateOrIgnore(ctx context.Context, game *entity.Ga
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *MockGameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winner string, payout int64, finishTxHash string) error {
-	args := m.Called(ctx, q, gameID, winner, payout, finishTxHash)
+func (m *MockGameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winner string, payout int64, finishTxHash string, completedAt time.Time) error {
+	args := m.Called(ctx, q, gameID, winner, payout, finishTxHash, completedAt)
 	return args.Error(0)
 }
 
@@ -289,4 +289,79 @@ func (m *MockGameEventRepository) GetLatestByGameID(ctx context.Context, gameID 
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*entity.GameEvent), args.Error(1)
+}
+
+// MockDeadLetterQueueRepository implements repository.DeadLetterQueueRepository for testing.
+type MockDeadLetterQueueRepository struct {
+	mock.Mock
+}
+
+func (m *MockDeadLetterQueueRepository) Create(ctx context.Context, entry *entity.DeadLetterEntry) error {
+	args := m.Called(ctx, entry)
+	return args.Error(0)
+}
+
+func (m *MockDeadLetterQueueRepository) GetByID(ctx context.Context, id int64) (*entity.DeadLetterEntry, error) {
+	args := m.Called(ctx, id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.DeadLetterEntry), args.Error(1)
+}
+
+func (m *MockDeadLetterQueueRepository) GetByTransactionHash(ctx context.Context, hash, lt string) (*entity.DeadLetterEntry, error) {
+	args := m.Called(ctx, hash, lt)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entity.DeadLetterEntry), args.Error(1)
+}
+
+func (m *MockDeadLetterQueueRepository) GetPendingForRetry(ctx context.Context, limit int) ([]*entity.DeadLetterEntry, error) {
+	args := m.Called(ctx, limit)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.DeadLetterEntry), args.Error(1)
+}
+
+func (m *MockDeadLetterQueueRepository) GetByStatus(ctx context.Context, status entity.DLQStatus, limit, offset int) ([]*entity.DeadLetterEntry, error) {
+	args := m.Called(ctx, status, limit, offset)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.DeadLetterEntry), args.Error(1)
+}
+
+func (m *MockDeadLetterQueueRepository) Update(ctx context.Context, entry *entity.DeadLetterEntry) error {
+	args := m.Called(ctx, entry)
+	return args.Error(0)
+}
+
+func (m *MockDeadLetterQueueRepository) UpdateStatus(ctx context.Context, id int64, status entity.DLQStatus, notes string) error {
+	args := m.Called(ctx, id, status, notes)
+	return args.Error(0)
+}
+
+func (m *MockDeadLetterQueueRepository) IncrementRetryCount(ctx context.Context, id int64, nextRetryAt time.Time) error {
+	args := m.Called(ctx, id, nextRetryAt)
+	return args.Error(0)
+}
+
+func (m *MockDeadLetterQueueRepository) Delete(ctx context.Context, id int64) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *MockDeadLetterQueueRepository) CountByStatus(ctx context.Context, status entity.DLQStatus) (int64, error) {
+	args := m.Called(ctx, status)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockDeadLetterQueueRepository) GetStats(ctx context.Context) (*repository.DLQStats, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*repository.DLQStats), args.Error(1)
 }

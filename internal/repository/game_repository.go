@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"pod-backend/internal/entity"
 )
@@ -53,25 +54,25 @@ type GameRepository interface {
 	// JoinGame updates a game when player 2 joins.
 	// Sets player_two_address, joined_at, join_tx_hash, and updates status.
 	// Returns error if game doesn't exist or already has player 2.
-	JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string) error
+	JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string, joinedAt time.Time) error
 
 	// RevealChoice updates a game when a player reveals their choice.
 	// Sets revealed_at, reveal_tx_hash, and the player's choice.
 	// Returns error if game doesn't exist.
-	RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string) error
+	RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string, revealedAt time.Time) error
 
 	// CompleteGame updates a game when it's finished.
 	// Sets winner_address, payout_amount, completed_at, complete_tx_hash, and status.
 	// Returns error if game doesn't exist.
-	CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error
+	CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string, completedAt time.Time) error
 
 	// CompleteGameWithQuerier performs CompleteGame using the provided Querier (for transaction support).
-	CompleteGameWithQuerier(ctx context.Context, q Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error
+	CompleteGameWithQuerier(ctx context.Context, q Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string, completedAt time.Time) error
 
 	// CancelGame marks a game as cancelled.
 	// Updates status to ENDED with no winner.
 	// Returns error if game doesn't exist.
-	CancelGame(ctx context.Context, gameID int64, cancelTxHash string) error
+	CancelGame(ctx context.Context, gameID int64, cancelTxHash string, completedAt time.Time) error
 
 	// DeleteOlderThan deletes games whose completed_at is older than the specified date.
 	// Used for data retention compliance (FR-017: 1 year retention).

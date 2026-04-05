@@ -187,7 +187,7 @@ func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Contex
 		UPDATE blockchain_sync_state
 		SET
 			last_processed_lt = CASE
-				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1::varchar
 				ELSE COALESCE(NULLIF(last_processed_lt, ''), '0')
 			END,
 			last_poll_timestamp = CASE
@@ -225,7 +225,7 @@ func (r *BlockchainSyncStateRepository) PersistCheckpoint(
 		UPDATE blockchain_sync_state
 		SET
 			last_processed_lt = CASE
-				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1::varchar
 				ELSE COALESCE(NULLIF(last_processed_lt, ''), '0')
 			END,
 			last_poll_timestamp = CASE

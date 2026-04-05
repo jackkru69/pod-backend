@@ -352,12 +352,11 @@ func (r *GameRepository) UpdateStatus(ctx context.Context, gameID int64, newStat
 }
 
 // JoinGame updates a game when player 2 joins.
-func (r *GameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string) error {
-	now := time.Now()
+func (r *GameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAddress string, joinTxHash string, joinedAt time.Time) error {
 	sql, args, err := r.pg.Builder.
 		Update("games").
 		Set("player_two_address", playerTwoAddress).
-		Set("joined_at", now).
+		Set("joined_at", joinedAt).
 		Set("join_tx_hash", joinTxHash).
 		Set("status", entity.GameStatusWaitingForOpenBids).
 		Set("player_one_choice", entity.CoinSideClosed). // Set to CLOSED (1) when game starts
@@ -377,9 +376,7 @@ func (r *GameRepository) JoinGame(ctx context.Context, gameID int64, playerTwoAd
 }
 
 // RevealChoice updates a game when a player reveals their choice.
-func (r *GameRepository) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string) error {
-	now := time.Now()
-
+func (r *GameRepository) RevealChoice(ctx context.Context, gameID int64, playerAddress string, choice int, revealTxHash string, revealedAt time.Time) error {
 	// First, get the game to determine which player is revealing
 	game, err := r.GetByID(ctx, gameID)
 	if err != nil {
@@ -387,7 +384,7 @@ func (r *GameRepository) RevealChoice(ctx context.Context, gameID int64, playerA
 	}
 
 	updateBuilder := r.pg.Builder.Update("games").
-		Set("revealed_at", now).
+		Set("revealed_at", revealedAt).
 		Set("reveal_tx_hash", revealTxHash)
 
 	if game.PlayerOneAddress == playerAddress {
@@ -412,20 +409,29 @@ func (r *GameRepository) RevealChoice(ctx context.Context, gameID int64, playerA
 }
 
 // CompleteGame updates a game when it's finished.
-func (r *GameRepository) CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error {
-	return r.CompleteGameWithQuerier(ctx, r.pg.Pool, gameID, winnerAddress, payoutAmount, completeTxHash)
+func (r *GameRepository) CompleteGame(ctx context.Context, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string, completedAt time.Time) error {
+	return r.CompleteGameWithQuerier(ctx, r.pg.Pool, gameID, winnerAddress, payoutAmount, completeTxHash, completedAt)
 }
 
 // CompleteGameWithQuerier performs CompleteGame using the provided Querier (for transaction support).
-func (r *GameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string) error {
-	now := time.Now()
+func (r *GameRepository) CompleteGameWithQuerier(ctx context.Context, q repository.Querier, gameID int64, winnerAddress string, payoutAmount int64, completeTxHash string, completedAt time.Time) error {
+	var winnerValue interface{}
+	if winnerAddress != "" {
+		winnerValue = winnerAddress
+	}
+
+	var payoutValue interface{}
+	if payoutAmount > 0 {
+		payoutValue = payoutAmount
+	}
+
 	sql, args, err := r.pg.Builder.
 		Update("games").
-		Set("winner_address", winnerAddress).
-		Set("payout_amount", payoutAmount).
-		Set("completed_at", now).
+		Set("winner_address", winnerValue).
+		Set("payout_amount", payoutValue).
+		Set("completed_at", completedAt).
 		Set("complete_tx_hash", completeTxHash).
-		Set("status", entity.GameStatusEnded).
+		Set("status", entity.GameStatusPaid).
 		Where("game_id = ?", gameID).
 		ToSql()
 	if err != nil {
@@ -441,12 +447,13 @@ func (r *GameRepository) CompleteGameWithQuerier(ctx context.Context, q reposito
 }
 
 // CancelGame marks a game as cancelled.
-func (r *GameRepository) CancelGame(ctx context.Context, gameID int64, cancelTxHash string) error {
-	now := time.Now()
+func (r *GameRepository) CancelGame(ctx context.Context, gameID int64, cancelTxHash string, completedAt time.Time) error {
 	sql, args, err := r.pg.Builder.
 		Update("games").
-		Set("status", entity.GameStatusEnded).
-		Set("completed_at", now).
+		Set("status", entity.GameStatusPaid).
+		Set("completed_at", completedAt).
+		Set("winner_address", nil).
+		Set("payout_amount", nil).
 		Set("complete_tx_hash", cancelTxHash).
 		Where("game_id = ?", gameID).
 		ToSql()

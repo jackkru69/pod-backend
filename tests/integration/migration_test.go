@@ -113,6 +113,10 @@ func TestMigrationsFreshDatabase(t *testing.T) {
 		validateBlockchainSyncStateTable(t, db)
 	})
 
+	t.Run("ValidateDeadLetterQueueTable", func(t *testing.T) {
+		validateDeadLetterQueueTable(t, db)
+	})
+
 	t.Run("ValidateIndexes", func(t *testing.T) {
 		validateIndexes(t, db)
 	})
@@ -473,6 +477,11 @@ func validateIndexes(t *testing.T, db *sql.DB) {
 		{"game_events", "idx_game_events_timestamp"},
 		{"game_events", "idx_game_events_event_type"},
 		{"blockchain_sync_state", "idx_blockchain_sync_state_contract"},
+		{"dead_letter_queue", "idx_dlq_status"},
+		{"dead_letter_queue", "idx_dlq_next_retry"},
+		{"dead_letter_queue", "idx_dlq_transaction_hash"},
+		{"dead_letter_queue", "idx_dlq_created_at"},
+		{"dead_letter_queue", "idx_dlq_unique_tx"},
 	}
 
 	for _, expected := range expectedIndexes {
@@ -646,6 +655,10 @@ func TestSchemaMatchesEntities(t *testing.T) {
 		validateBlockchainSyncStateTable(t, db)
 	})
 
+	t.Run("DeadLetterQueueTableMatchesEntity", func(t *testing.T) {
+		validateDeadLetterQueueTable(t, db)
+	})
+
 	// Additional checks for SC-003: zero schema mismatches
 	t.Run("NoUnexpectedTables", func(t *testing.T) {
 		var unexpectedTables []string
@@ -654,7 +667,7 @@ func TestSchemaMatchesEntities(t *testing.T) {
 			FROM information_schema.tables
 			WHERE table_schema = 'public'
 			AND table_type = 'BASE TABLE'
-			AND table_name NOT IN ('users', 'games', 'game_events', 'blockchain_sync_state', 'schema_migrations')
+			AND table_name NOT IN ('users', 'games', 'game_events', 'blockchain_sync_state', 'dead_letter_queue', 'schema_migrations')
 		`)
 		require.NoError(t, err)
 		defer rows.Close()
@@ -688,6 +701,68 @@ func TestSchemaMatchesEntities(t *testing.T) {
 		assert.Empty(t, unexpectedEnums,
 			"Database should not contain enum types (entity layer uses strings, not enums)")
 	})
+}
+
+func validateDeadLetterQueueTable(t *testing.T, db *sql.DB) {
+	ctx := context.Background()
+
+	var tableExists bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT FROM information_schema.tables
+			WHERE table_name = 'dead_letter_queue'
+		)
+	`).Scan(&tableExists)
+	require.NoError(t, err)
+	assert.True(t, tableExists, "dead_letter_queue table should exist")
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT column_name, data_type, is_nullable
+		FROM information_schema.columns
+		WHERE table_name = 'dead_letter_queue'
+		ORDER BY ordinal_position
+	`)
+	require.NoError(t, err)
+	defer rows.Close()
+
+	expectedColumns := map[string]struct {
+		dataType   string
+		isNullable string
+	}{
+		"id":               {"bigint", "NO"},
+		"transaction_hash": {"character varying", "NO"},
+		"transaction_lt":   {"character varying", "NO"},
+		"raw_data":         {"text", "NO"},
+		"error_message":    {"text", "NO"},
+		"error_type":       {"character varying", "NO"},
+		"retry_count":      {"integer", "YES"},
+		"max_retries":      {"integer", "YES"},
+		"created_at":       {"timestamp with time zone", "NO"},
+		"last_retry_at":    {"timestamp with time zone", "YES"},
+		"next_retry_at":    {"timestamp with time zone", "YES"},
+		"resolved_at":      {"timestamp with time zone", "YES"},
+		"status":           {"character varying", "NO"},
+		"resolution_notes": {"text", "YES"},
+	}
+
+	foundColumns := make(map[string]bool)
+	for rows.Next() {
+		var colName, dataType, isNullable string
+		require.NoError(t, rows.Scan(&colName, &dataType, &isNullable))
+
+		if expected, ok := expectedColumns[colName]; ok {
+			assert.Equal(t, expected.dataType, dataType,
+				"Column %s should have type %s", colName, expected.dataType)
+			assert.Equal(t, expected.isNullable, isNullable,
+				"Column %s nullable mismatch", colName)
+			foundColumns[colName] = true
+		}
+	}
+
+	for colName := range expectedColumns {
+		assert.True(t, foundColumns[colName],
+			"Column %s should exist in dead_letter_queue table", colName)
+	}
 }
 
 // Helper functions for idempotency testing

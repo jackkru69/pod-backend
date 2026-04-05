@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	sq "github.com/Masterminds/squirrel"
-
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
 	"pod-backend/pkg/postgres"
@@ -159,29 +158,53 @@ func (r *UserRepository) EnsureUserByWallet(ctx context.Context, walletAddress s
 
 // GetByWalletAddress retrieves a user by their wallet address.
 func (r *UserRepository) GetByWalletAddress(ctx context.Context, walletAddress string) (*entity.User, error) {
-	sql, args, err := r.pg.Builder.
-		Select(
-			"id",
-			"telegram_user_id",
-			"telegram_username",
-			"wallet_address",
-			"total_games_played",
-			"total_wins",
-			"total_losses",
-			"total_referrals",
-			"total_referral_earnings",
-			"created_at",
-			"updated_at",
-		).
-		From("users").
-		Where("wallet_address = ?", walletAddress).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build query: %w", err)
-	}
-
 	user := &entity.User{}
-	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(
+	err := r.pg.Pool.QueryRow(ctx, `
+		SELECT
+			u.id,
+			u.telegram_user_id,
+			u.telegram_username,
+			u.wallet_address,
+			COALESCE(game_stats.total_games_played, 0) AS total_games_played,
+			COALESCE(game_stats.total_wins, 0) AS total_wins,
+			COALESCE(game_stats.total_losses, 0) AS total_losses,
+			COALESCE(referral_stats.total_referrals, 0) AS total_referrals,
+			u.total_referral_earnings,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		LEFT JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (
+					WHERE g.status IN ($2, $3)
+						AND NOT (g.winner_address IS NULL AND g.payout_amount IS NULL)
+				) AS total_games_played,
+				COUNT(*) FILTER (
+					WHERE g.status IN ($2, $3)
+						AND g.winner_address = $1
+				) AS total_wins,
+				COUNT(*) FILTER (
+					WHERE g.status IN ($2, $3)
+						AND g.winner_address IS NOT NULL
+						AND g.winner_address <> $1
+				) AS total_losses
+			FROM games g
+			WHERE g.player_one_address = $1 OR g.player_two_address = $1
+		) AS game_stats ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT COUNT(DISTINCT referred_wallet) AS total_referrals
+			FROM (
+				SELECT g.player_one_address AS referred_wallet
+				FROM games g
+				WHERE g.player_one_referrer = $1
+				UNION ALL
+				SELECT g.player_two_address AS referred_wallet
+				FROM games g
+				WHERE g.player_two_referrer = $1 AND g.player_two_address IS NOT NULL
+			) referred
+		) AS referral_stats ON TRUE
+		WHERE u.wallet_address = $1
+	`, walletAddress, entity.GameStatusEnded, entity.GameStatusPaid).Scan(
 		&user.ID,
 		&user.TelegramUserID,
 		&user.TelegramUsername,
@@ -390,49 +413,38 @@ func (r *UserRepository) IncrementReferralsWithQuerier(ctx context.Context, q re
 // GetReferralStats retrieves referral statistics for a user (FR-021).
 // Returns aggregated referral metrics including total referrals, earnings, and games referred.
 func (r *UserRepository) GetReferralStats(ctx context.Context, walletAddress string) (*entity.ReferralStats, error) {
-	// Query user stats from users table
-	userSQL, userArgs, err := r.pg.Builder.
-		Select("total_referrals", "total_referral_earnings").
-		From("users").
-		Where("wallet_address = ?", walletAddress).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build user query: %w", err)
-	}
-
 	stats := &entity.ReferralStats{
 		WalletAddress: walletAddress,
 	}
 
-	var totalReferrals int
-	var totalEarnings int64
-	err = r.pg.Pool.QueryRow(ctx, userSQL, userArgs...).Scan(&totalReferrals, &totalEarnings)
+	err := r.pg.Pool.QueryRow(ctx, `
+		SELECT
+			COALESCE((
+				SELECT COUNT(DISTINCT referred_wallet)
+				FROM (
+					SELECT g.player_one_address AS referred_wallet
+					FROM games g
+					WHERE g.player_one_referrer = $1
+					UNION ALL
+					SELECT g.player_two_address AS referred_wallet
+					FROM games g
+					WHERE g.player_two_referrer = $1 AND g.player_two_address IS NOT NULL
+				) referred
+			), 0) AS total_referrals,
+			COALESCE((
+				SELECT total_referral_earnings
+				FROM users
+				WHERE wallet_address = $1
+			), 0) AS total_referral_earnings,
+			COALESCE((
+				SELECT COUNT(*)
+				FROM games g
+				WHERE g.player_one_referrer = $1 OR g.player_two_referrer = $1
+			), 0) AS games_referred
+	`, walletAddress).Scan(&stats.TotalReferrals, &stats.TotalReferralEarnings, &stats.GamesReferred)
 	if err != nil {
-		// If user doesn't exist, return zero stats
-		return stats, nil
+		return nil, fmt.Errorf("execute query: %w", err)
 	}
-
-	stats.TotalReferrals = int64(totalReferrals)
-	stats.TotalReferralEarnings = totalEarnings
-
-	// Count games where this wallet was a referrer
-	gamesSQL, gamesArgs, err := r.pg.Builder.
-		Select("COUNT(*)").
-		From("games").
-		Where("player_one_referrer = ? OR player_two_referrer = ?", walletAddress, walletAddress).
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build games query: %w", err)
-	}
-
-	var gamesReferred int64
-	err = r.pg.Pool.QueryRow(ctx, gamesSQL, gamesArgs...).Scan(&gamesReferred)
-	if err != nil {
-		// If query fails, set to 0
-		gamesReferred = 0
-	}
-
-	stats.GamesReferred = gamesReferred
 
 	return stats, nil
 }

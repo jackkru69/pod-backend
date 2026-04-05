@@ -31,25 +31,25 @@ func safeUint256ToInt64(value *big.Int, fieldName string) (int64, error) {
 // Header values from ABI: "GameInitializedNotify": {"header": 3945341079}
 const (
 	// GameInitializedNotify opcode = 3945341079 = 0xEB292097
-	OpcodeGameInitializedNotifyV2 uint32 = 3945341079
+	OpcodeGameInitializedNotifyV2 uint32 = OpcodeGameInitializedNotify
 
 	// GameStartedNotify opcode = 102653531 = 0x061E13DB
-	OpcodeGameStartedNotifyV2 uint32 = 102653531
+	OpcodeGameStartedNotifyV2 uint32 = OpcodeGameStartedNotify
 
 	// GameFinishedNotify opcode = 535291459 = 0x1FE61E43
-	OpcodeGameFinishedNotifyV2 uint32 = 535291459
+	OpcodeGameFinishedNotifyV2 uint32 = OpcodeGameFinishedNotify
 
 	// GameCancelledNotify opcode = 388530130 = 0x172AD3D2
-	OpcodeGameCancelledNotifyV2 uint32 = 388530130
+	OpcodeGameCancelledNotifyV2 uint32 = OpcodeGameCancelledNotify
 
 	// SecretOpenedNotify opcode = 1202198728 = 0x47A29FC8
-	OpcodeSecretOpenedNotifyV2 uint32 = 1202198728
+	OpcodeSecretOpenedNotifyV2 uint32 = OpcodeSecretOpenedNotify
 
 	// DrawNotify opcode = 317981831 = 0x12F4A487
-	OpcodeDrawNotifyV2 uint32 = 317981831
+	OpcodeDrawNotifyV2 uint32 = OpcodeDrawNotify
 
 	// InsufficientBalanceNotify opcode = 4148213171 = 0xF76E49B3
-	OpcodeInsufficientBalanceNotifyV2 uint32 = 4148213171
+	OpcodeInsufficientBalanceNotifyV2 uint32 = OpcodeInsufficientBalanceNotify
 
 	// Factory Event opcodes (emitted via emit() - appear in out_msgs)
 	// From PODGameFactory_PODGameFactory.abi
@@ -62,6 +62,8 @@ const (
 
 // MessageParserV2 parses TON blockchain messages using tonutils-go Cell parser.
 type MessageParserV2 struct{}
+
+var _ InMsgParser = (*MessageParserV2)(nil)
 
 // NewMessageParserV2 creates a new TON message parser.
 func NewMessageParserV2() *MessageParserV2 {
@@ -435,72 +437,12 @@ func (p *MessageParserV2) parseInsufficientBalanceNotifyV2(msg *ParsedMessage, s
 
 // parseLegacyJSON handles the legacy JSON format used in tests.
 func (p *MessageParserV2) parseLegacyJSON(inMsgJSON json.RawMessage) (*ParsedMessage, error) {
-	var data map[string]interface{}
-	if err := json.Unmarshal(inMsgJSON, &data); err != nil {
-		return nil, fmt.Errorf("failed to parse legacy JSON: %w", err)
-	}
-
-	eventType, ok := data["event_type"].(string)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid event_type in legacy JSON")
-	}
-
-	gameIDFloat, ok := data["game_id"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("missing or invalid game_id in legacy JSON")
-	}
-
-	msg := &ParsedMessage{
-		EventType: eventType,
-		GameID:    int64(gameIDFloat),
-	}
-
-	// Extract optional fields
-	if playerOne, ok := data["player_one"].(string); ok {
-		msg.PlayerOne = playerOne
-	}
-	if playerTwo, ok := data["player_two"].(string); ok {
-		msg.PlayerTwo = playerTwo
-	}
-	if winner, ok := data["winner"].(string); ok {
-		msg.Winner = winner
-	}
-	if looser, ok := data["looser"].(string); ok {
-		msg.Looser = looser
-	}
-	if player, ok := data["player"].(string); ok {
-		msg.Player = player
-	}
-	if betAmount, ok := data["bet_amount"].(string); ok {
-		msg.BidValue, _ = new(big.Int).SetString(betAmount, 10)
-	}
-	if coinSide, ok := data["coin_side"].(float64); ok {
-		msg.CoinSide = uint8(coinSide)
-	}
-
-	return msg, nil
+	return parseLegacyParsedMessage(inMsgJSON)
 }
 
 // GetEventTypeForOpcodeV2 returns the event type string for a given opcode.
 func GetEventTypeForOpcodeV2(opcode uint32) (string, bool) {
-	switch opcode {
-	case OpcodeGameInitializedNotifyV2:
-		return EventTypeGameInitialized, true
-	case OpcodeGameStartedNotifyV2:
-		return EventTypeGameStarted, true
-	case OpcodeGameFinishedNotifyV2:
-		return EventTypeGameFinished, true
-	case OpcodeGameCancelledNotifyV2:
-		return EventTypeGameCancelled, true
-	case OpcodeSecretOpenedNotifyV2:
-		return EventTypeSecretOpened, true
-	case OpcodeDrawNotifyV2:
-		return EventTypeDraw, true
-	case OpcodeInsufficientBalanceNotifyV2:
-		return EventTypeInsufficientBalance, true
-	default:
-		return "", false
-	}
+	return GetEventTypeForOpcode(opcode)
 }
 
 // Backward compatibility - keep old variable names pointing to correct values

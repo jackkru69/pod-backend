@@ -9,7 +9,6 @@ import (
 
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog/log"
-
 	"pod-backend/internal/entity"
 )
 
@@ -22,6 +21,8 @@ const (
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
 )
+
+const websocketWriteDeadline = 10 * time.Second
 
 // GameEventType represents the type of blockchain event that triggered the update
 type GameEventType string
@@ -39,6 +40,7 @@ const (
 // ReservationCreatedEvent is sent when a game is reserved
 type ReservationCreatedEvent struct {
 	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
 	GameID     int64  `json:"game_id"`
 	ReservedBy string `json:"reserved_by"`
 	ExpiresAt  string `json:"expires_at"` // ISO 8601
@@ -46,9 +48,21 @@ type ReservationCreatedEvent struct {
 
 // ReservationReleasedEvent is sent when a reservation is released
 type ReservationReleasedEvent struct {
-	Type   string `json:"type"`
-	GameID int64  `json:"game_id"`
-	Reason string `json:"reason"` // "expired", "cancelled", "joined"
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	GameID    int64  `json:"game_id"`
+	Reason    string `json:"reason"` // "expired", "cancelled", "joined"
+}
+
+type GameStateUpdateEvent struct {
+	Type      string       `json:"type"`
+	Timestamp string       `json:"timestamp"`
+	EventType string       `json:"event_type,omitempty"`
+	Data      *entity.Game `json:"data"`
+}
+
+func websocketTimestamp(t time.Time) string {
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // WebSocketConn is an interface for WebSocket connections to enable testing
@@ -84,7 +98,7 @@ func NewGameBroadcastUseCase() *GameBroadcastUseCase {
 
 // Subscribe adds a WebSocket connection to receive updates for a specific game
 // Use gameID = GlobalGameID (0) to subscribe to all game updates
-func (uc *GameBroadcastUseCase) Subscribe(ctx context.Context, gameID int64, clientID string, conn WebSocketConn) {
+func (uc *GameBroadcastUseCase) Subscribe(_ context.Context, gameID int64, clientID string, conn WebSocketConn) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 
@@ -116,7 +130,7 @@ func (uc *GameBroadcastUseCase) Subscribe(ctx context.Context, gameID int64, cli
 }
 
 // Unsubscribe removes a WebSocket connection from game updates
-func (uc *GameBroadcastUseCase) Unsubscribe(ctx context.Context, gameID int64, clientID string) {
+func (uc *GameBroadcastUseCase) Unsubscribe(_ context.Context, gameID int64, clientID string) {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 
@@ -150,34 +164,8 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdate(ctx context.Context, game *e
 // BroadcastGameUpdateWithEvent sends a game update with event type to all subscribers.
 // RACE CONDITION FIX: Deep copy subscriber maps while holding lock to prevent
 // concurrent modification during iteration.
-func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context, game *entity.Game, eventType GameEventType) error {
-	// Deep copy subscribers while holding lock to prevent race condition
-	uc.mu.RLock()
-	allSubscribers := make(map[string]*subscriber)
-
-	// Copy game-specific subscribers
-	if gameSubscribers := uc.gameSubscribers[game.GameID]; gameSubscribers != nil {
-		for k, v := range gameSubscribers {
-			allSubscribers[k] = v
-		}
-	}
-
-	// Copy global subscribers
-	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
-		for k, v := range globalSubscribers {
-			allSubscribers[k] = v
-		}
-	}
-
-	// Also capture which clients are global for later cleanup
-	globalClientIDs := make(map[string]bool)
-	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
-		for k := range globalSubscribers {
-			globalClientIDs[k] = true
-		}
-	}
-	uc.mu.RUnlock()
-
+func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(_ context.Context, game *entity.Game, eventType GameEventType) error {
+	allSubscribers, globalClientIDs := uc.snapshotSubscribers(game.GameID)
 	if len(allSubscribers) == 0 {
 		log.Debug().
 			Int64("game_id", game.GameID).
@@ -186,12 +174,13 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 	}
 
 	// Create game update message matching OpenAPI spec with event_type
-	msgData := map[string]interface{}{
-		"type": MessageTypeGameStateUpdate,
-		"data": game,
+	msgData := GameStateUpdateEvent{
+		Type:      MessageTypeGameStateUpdate,
+		Timestamp: websocketTimestamp(time.Now()),
+		Data:      game,
 	}
 	if eventType != "" {
-		msgData["event_type"] = string(eventType)
+		msgData.EventType = string(eventType)
 	}
 	message, err := json.Marshal(msgData)
 	if err != nil {
@@ -202,79 +191,16 @@ func (uc *GameBroadcastUseCase) BroadcastGameUpdateWithEvent(ctx context.Context
 		return fmt.Errorf("failed to serialize game update: %w", err)
 	}
 
-	// Track failed connections for cleanup
-	var failedGameClients []string
-	var failedGlobalClients []string
+	failedGameClients, failedGlobalClients := uc.broadcastSerializedMessage(
+		game.GameID,
+		message,
+		allSubscribers,
+		globalClientIDs,
+		"Failed to send game update to client",
+		"Game update sent to client",
+	)
 
-	// Broadcast to all subscribers
-	for clientID, sub := range allSubscribers {
-		// Set write deadline to prevent slow clients from blocking
-		if err := sub.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-			log.Warn().
-				Err(err).
-				Int64("game_id", game.GameID).
-				Str("client_id", clientID).
-				Msg("Failed to set write deadline")
-			// Check if this is a global or game-specific subscriber
-			if globalClientIDs[clientID] {
-				failedGlobalClients = append(failedGlobalClients, clientID)
-			} else {
-				failedGameClients = append(failedGameClients, clientID)
-			}
-			continue
-		}
-
-		// Send message
-		if err := sub.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			log.Warn().
-				Err(err).
-				Int64("game_id", game.GameID).
-				Str("client_id", clientID).
-				Msg("Failed to send game update to client")
-			if globalClientIDs[clientID] {
-				failedGlobalClients = append(failedGlobalClients, clientID)
-			} else {
-				failedGameClients = append(failedGameClients, clientID)
-			}
-			continue
-		}
-
-		log.Debug().
-			Int64("game_id", game.GameID).
-			Str("client_id", clientID).
-			Int("message_size", len(message)).
-			Msg("Game update sent to client")
-	}
-
-	// Clean up failed game-specific connections
-	if len(failedGameClients) > 0 {
-		uc.mu.Lock()
-		for _, clientID := range failedGameClients {
-			if sub, exists := uc.gameSubscribers[game.GameID][clientID]; exists {
-				sub.conn.Close()
-				delete(uc.gameSubscribers[game.GameID], clientID)
-				uc.activeConnections--
-			}
-		}
-		// Clean up empty game map
-		if len(uc.gameSubscribers[game.GameID]) == 0 {
-			delete(uc.gameSubscribers, game.GameID)
-		}
-		uc.mu.Unlock()
-	}
-
-	// Clean up failed global connections
-	if len(failedGlobalClients) > 0 {
-		uc.mu.Lock()
-		for _, clientID := range failedGlobalClients {
-			if sub, exists := uc.gameSubscribers[GlobalGameID][clientID]; exists {
-				sub.conn.Close()
-				delete(uc.gameSubscribers[GlobalGameID], clientID)
-				uc.activeConnections--
-			}
-		}
-		uc.mu.Unlock()
-	}
+	uc.cleanupFailedConnections(game.GameID, failedGameClients, failedGlobalClients)
 
 	totalFailed := len(failedGameClients) + len(failedGlobalClients)
 	if totalFailed > 0 {
@@ -314,7 +240,7 @@ func (uc *GameBroadcastUseCase) GetGameSubscriberCount(gameID int64) int {
 }
 
 // CloseAllConnections closes all active WebSocket connections (for graceful shutdown)
-func (uc *GameBroadcastUseCase) CloseAllConnections(ctx context.Context) error {
+func (uc *GameBroadcastUseCase) CloseAllConnections(_ context.Context) error {
 	uc.mu.Lock()
 	defer uc.mu.Unlock()
 
@@ -349,6 +275,7 @@ func (uc *GameBroadcastUseCase) CloseAllConnections(ctx context.Context) error {
 func (uc *GameBroadcastUseCase) BroadcastReservationCreated(ctx context.Context, reservation *entity.GameReservation) error {
 	event := ReservationCreatedEvent{
 		Type:       MessageTypeReservationCreated,
+		Timestamp:  websocketTimestamp(time.Now()),
 		GameID:     reservation.GameID,
 		ReservedBy: reservation.WalletAddress,
 		ExpiresAt:  reservation.ExpiresAt.Format(time.RFC3339),
@@ -360,9 +287,10 @@ func (uc *GameBroadcastUseCase) BroadcastReservationCreated(ctx context.Context,
 // BroadcastReservationReleased sends a reservation released event to all subscribers of that game
 func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context, gameID int64, reason string) error {
 	event := ReservationReleasedEvent{
-		Type:   MessageTypeReservationReleased,
-		GameID: gameID,
-		Reason: reason,
+		Type:      MessageTypeReservationReleased,
+		Timestamp: websocketTimestamp(time.Now()),
+		GameID:    gameID,
+		Reason:    reason,
 	}
 
 	return uc.broadcastEvent(ctx, gameID, event)
@@ -370,34 +298,8 @@ func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context
 
 // broadcastEvent sends an arbitrary event to all subscribers of a game AND global subscribers.
 // RACE CONDITION FIX: Deep copy subscriber maps while holding lock.
-func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64, event interface{}) error {
-	// Deep copy subscribers while holding lock to prevent race condition
-	uc.mu.RLock()
-	allSubscribers := make(map[string]*subscriber)
-
-	// Copy game-specific subscribers
-	if gameSubscribers := uc.gameSubscribers[gameID]; gameSubscribers != nil {
-		for k, v := range gameSubscribers {
-			allSubscribers[k] = v
-		}
-	}
-
-	// Copy global subscribers
-	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
-		for k, v := range globalSubscribers {
-			allSubscribers[k] = v
-		}
-	}
-
-	// Track which clients are global for later cleanup
-	globalClientIDs := make(map[string]bool)
-	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
-		for k := range globalSubscribers {
-			globalClientIDs[k] = true
-		}
-	}
-	uc.mu.RUnlock()
-
+func (uc *GameBroadcastUseCase) broadcastEvent(_ context.Context, gameID int64, event interface{}) error {
+	allSubscribers, globalClientIDs := uc.snapshotSubscribers(gameID)
 	if len(allSubscribers) == 0 {
 		log.Debug().
 			Int64("game_id", gameID).
@@ -415,78 +317,16 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 		return fmt.Errorf("failed to serialize event: %w", err)
 	}
 
-	// Track failed connections for cleanup
-	var failedGameClients []string
-	var failedGlobalClients []string
+	failedGameClients, failedGlobalClients := uc.broadcastSerializedMessage(
+		gameID,
+		message,
+		allSubscribers,
+		globalClientIDs,
+		"Failed to send event to client",
+		"Event sent to client",
+	)
 
-	// Broadcast to all subscribers
-	for clientID, sub := range allSubscribers {
-		// Set write deadline to prevent slow clients from blocking
-		if err := sub.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-			log.Warn().
-				Err(err).
-				Int64("game_id", gameID).
-				Str("client_id", clientID).
-				Msg("Failed to set write deadline")
-			if globalClientIDs[clientID] {
-				failedGlobalClients = append(failedGlobalClients, clientID)
-			} else {
-				failedGameClients = append(failedGameClients, clientID)
-			}
-			continue
-		}
-
-		// Send message
-		if err := sub.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			log.Warn().
-				Err(err).
-				Int64("game_id", gameID).
-				Str("client_id", clientID).
-				Msg("Failed to send event to client")
-			if globalClientIDs[clientID] {
-				failedGlobalClients = append(failedGlobalClients, clientID)
-			} else {
-				failedGameClients = append(failedGameClients, clientID)
-			}
-			continue
-		}
-
-		log.Debug().
-			Int64("game_id", gameID).
-			Str("client_id", clientID).
-			Int("message_size", len(message)).
-			Msg("Event sent to client")
-	}
-
-	// Clean up failed game-specific connections
-	if len(failedGameClients) > 0 {
-		uc.mu.Lock()
-		for _, clientID := range failedGameClients {
-			if sub, exists := uc.gameSubscribers[gameID][clientID]; exists {
-				sub.conn.Close()
-				delete(uc.gameSubscribers[gameID], clientID)
-				uc.activeConnections--
-			}
-		}
-		// Clean up empty game map
-		if len(uc.gameSubscribers[gameID]) == 0 {
-			delete(uc.gameSubscribers, gameID)
-		}
-		uc.mu.Unlock()
-	}
-
-	// Clean up failed global connections
-	if len(failedGlobalClients) > 0 {
-		uc.mu.Lock()
-		for _, clientID := range failedGlobalClients {
-			if sub, exists := uc.gameSubscribers[GlobalGameID][clientID]; exists {
-				sub.conn.Close()
-				delete(uc.gameSubscribers[GlobalGameID], clientID)
-				uc.activeConnections--
-			}
-		}
-		uc.mu.Unlock()
-	}
+	uc.cleanupFailedConnections(gameID, failedGameClients, failedGlobalClients)
 
 	totalFailed := len(failedGameClients) + len(failedGlobalClients)
 	if totalFailed > 0 {
@@ -504,4 +344,107 @@ func (uc *GameBroadcastUseCase) broadcastEvent(ctx context.Context, gameID int64
 		Msg("Event broadcast completed")
 
 	return nil
+}
+
+func (uc *GameBroadcastUseCase) snapshotSubscribers(gameID int64) (allSubscribers map[string]*subscriber, globalClientIDs map[string]bool) {
+	uc.mu.RLock()
+	defer uc.mu.RUnlock()
+
+	allSubscribers = make(map[string]*subscriber)
+
+	if gameSubscribers := uc.gameSubscribers[gameID]; gameSubscribers != nil {
+		for clientID, sub := range gameSubscribers {
+			allSubscribers[clientID] = sub
+		}
+	}
+
+	globalClientIDs = make(map[string]bool)
+
+	if globalSubscribers := uc.gameSubscribers[GlobalGameID]; globalSubscribers != nil {
+		for clientID, sub := range globalSubscribers {
+			allSubscribers[clientID] = sub
+			globalClientIDs[clientID] = true
+		}
+	}
+
+	return allSubscribers, globalClientIDs
+}
+
+func (uc *GameBroadcastUseCase) broadcastSerializedMessage(
+	gameID int64,
+	message []byte,
+	allSubscribers map[string]*subscriber,
+	globalClientIDs map[string]bool,
+	writeFailureLog, writeSuccessLog string,
+) (failedGameClients, failedGlobalClients []string) {
+	for clientID, sub := range allSubscribers {
+		if err := sub.conn.SetWriteDeadline(time.Now().Add(websocketWriteDeadline)); err != nil {
+			log.Warn().
+				Err(err).
+				Int64("game_id", gameID).
+				Str("client_id", clientID).
+				Msg("Failed to set write deadline")
+
+			if globalClientIDs[clientID] {
+				failedGlobalClients = append(failedGlobalClients, clientID)
+			} else {
+				failedGameClients = append(failedGameClients, clientID)
+			}
+
+			continue
+		}
+
+		if err := sub.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			log.Warn().
+				Err(err).
+				Int64("game_id", gameID).
+				Str("client_id", clientID).
+				Msg(writeFailureLog)
+
+			if globalClientIDs[clientID] {
+				failedGlobalClients = append(failedGlobalClients, clientID)
+			} else {
+				failedGameClients = append(failedGameClients, clientID)
+			}
+
+			continue
+		}
+
+		log.Debug().
+			Int64("game_id", gameID).
+			Str("client_id", clientID).
+			Int("message_size", len(message)).
+			Msg(writeSuccessLog)
+	}
+
+	return failedGameClients, failedGlobalClients
+}
+
+func (uc *GameBroadcastUseCase) cleanupFailedConnections(gameID int64, failedGameClients, failedGlobalClients []string) {
+	if len(failedGameClients) == 0 && len(failedGlobalClients) == 0 {
+		return
+	}
+
+	uc.mu.Lock()
+	defer uc.mu.Unlock()
+
+	for _, clientID := range failedGameClients {
+		if sub, exists := uc.gameSubscribers[gameID][clientID]; exists {
+			sub.conn.Close()
+			delete(uc.gameSubscribers[gameID], clientID)
+			uc.activeConnections--
+		}
+	}
+
+	if len(uc.gameSubscribers[gameID]) == 0 {
+		delete(uc.gameSubscribers, gameID)
+	}
+
+	for _, clientID := range failedGlobalClients {
+		if sub, exists := uc.gameSubscribers[GlobalGameID][clientID]; exists {
+			sub.conn.Close()
+			delete(uc.gameSubscribers[GlobalGameID], clientID)
+			uc.activeConnections--
+		}
+	}
 }

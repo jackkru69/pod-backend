@@ -84,7 +84,7 @@ type (
 
 	// GameBackend - Game backend specific configuration
 	GameBackend struct {
-		TONCenterV2URL        string `env:"TON_CENTER_V2_URL" envDefault:"http://localhost:8082"`
+		TONCenterV2URL        string `env:"TON_CENTER_V2_URL" envDefault:"http://localhost:8082/api/v2"`
 		TONCenterV3WSURL      string `env:"TON_CENTER_V3_WS_URL" envDefault:"ws://localhost:8081/api/v3/websocket"`
 		TONGameContractAddr   string `env:"TON_GAME_CONTRACT_ADDRESS"`
 		HTTPPort              string `env:"GAME_BACKEND_HTTP_PORT" envDefault:"3000"`

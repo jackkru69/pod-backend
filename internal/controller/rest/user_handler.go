@@ -5,7 +5,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
-
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
@@ -121,7 +120,7 @@ func (h *UserHandler) GetUserGameHistory(c *fiber.Ctx) error {
 	}
 
 	// Retrieve game history (FR-006)
-	games, err := h.gameUseCase.GetGamesByPlayer(c.Context(), walletAddress, limit, offset)
+	games, total, err := h.gameUseCase.GetGamesByPlayerPage(c.Context(), walletAddress, limit, offset)
 	if err != nil {
 		h.logger.Error().Err(err).Str("wallet_address", walletAddress).Msg("Failed to retrieve game history")
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
@@ -139,7 +138,7 @@ func (h *UserHandler) GetUserGameHistory(c *fiber.Ctx) error {
 		Games:         games,
 		Limit:         limit,
 		Offset:        offset,
-		Total:         len(games),
+		Total:         total,
 	})
 }
 

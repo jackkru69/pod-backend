@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-
+	"github.com/stretchr/testify/require"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
@@ -157,11 +157,65 @@ func TestHandleGameStarted_Success(t *testing.T) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
 	}).Return(nil)
-	mockGameRepo.On("JoinGame", mock.Anything, int64(123), "EQAnotherPlayerWalletAddress123456789012345678", "tx_start_123").Return(nil)
+	mockGameRepo.On("JoinGame", mock.Anything, int64(123), "EQAnotherPlayerWalletAddress123456789012345678", "tx_start_123", event.Timestamp).Return(nil)
 
 	err := uc.HandleGameStarted(context.Background(), event)
 
 	assert.NoError(t, err)
+	mockEventRepo.AssertExpectations(t)
+	mockGameRepo.AssertExpectations(t)
+	mockUserRepo.AssertExpectations(t)
+}
+
+func TestHandleGameStarted_ReleasesReservation(t *testing.T) {
+	ctx := context.Background()
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
+
+	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
+	reservationUC := usecase.NewReservationUseCase(mockGameRepo, nil, usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	})
+	uc.SetReservationUseCase(reservationUC)
+
+	existingGame := &entity.Game{
+		GameID:           123,
+		PlayerOneAddress: testWallet1,
+		Status:           entity.GameStatusWaitingForOpponent,
+	}
+
+	mockGameRepo.On("GetByID", ctx, int64(123)).Return(existingGame, nil).Twice()
+	_, err := reservationUC.Reserve(ctx, 123, testWallet2)
+	require.NoError(t, err)
+
+	event := &entity.GameEvent{
+		EventType:       entity.EventTypeGameStarted,
+		GameID:          123,
+		TransactionHash: "tx_start_123",
+		BlockNumber:     1001,
+		Timestamp:       time.Now(),
+		EventData: map[string]interface{}{
+			"game_id":    int64(123),
+			"player_two": testWallet2,
+		},
+	}
+
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, testWallet2).Return(nil)
+	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
+		e := args.Get(1).(*entity.GameEvent)
+		e.ID = 1
+	}).Return(nil)
+	mockGameRepo.On("JoinGame", mock.Anything, int64(123), testWallet2, "tx_start_123", event.Timestamp).Return(nil)
+
+	err = uc.HandleGameStarted(ctx, event)
+
+	assert.NoError(t, err)
+	reservation, getErr := reservationUC.GetReservation(ctx, 123)
+	require.NoError(t, getErr)
+	assert.Nil(t, reservation)
 	mockEventRepo.AssertExpectations(t)
 	mockGameRepo.AssertExpectations(t)
 	mockUserRepo.AssertExpectations(t)
@@ -196,9 +250,9 @@ func TestHandleGameFinished_Success(t *testing.T) {
 		BlockNumber:     1002,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
-			"game_id": int64(123),
-			"winner":  winnerAddress,
-			"payout":  int64(1900000000), // 1.9 TON (after fees)
+			"game_id":        int64(123),
+			"winner":         winnerAddress,
+			"total_gainings": int64(1900000000), // Contract event payload
 		},
 	}
 
@@ -206,7 +260,7 @@ func TestHandleGameFinished_Success(t *testing.T) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
 	}).Return(nil)
-	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123").Return(nil)
+	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123", event.Timestamp).Return(nil)
 
 	// Expect user statistics updates
 	mockUserRepo.On("IncrementGamesPlayed", mock.Anything, winnerAddress).Return(nil)
@@ -258,7 +312,7 @@ func TestHandleDraw_Success(t *testing.T) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
 	}).Return(nil)
-	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), "", int64(0), "tx_draw_123").Return(nil)
+	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), "", int64(0), "tx_draw_123", event.Timestamp).Return(nil)
 
 	// Both players should have games played incremented (no winner/loser)
 	mockUserRepo.On("IncrementGamesPlayed", mock.Anything, player1).Return(nil)
@@ -370,9 +424,9 @@ func TestHandleGameFinished_WithReferrer(t *testing.T) {
 		BlockNumber:     1002,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
-			"game_id": int64(123),
-			"winner":  winnerAddress,
-			"payout":  int64(1900000000),
+			"game_id":        int64(123),
+			"winner":         winnerAddress,
+			"total_gainings": int64(1900000000),
 		},
 	}
 
@@ -380,7 +434,7 @@ func TestHandleGameFinished_WithReferrer(t *testing.T) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
 	}).Return(nil)
-	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123").Return(nil)
+	mockGameRepo.On("CompleteGame", mock.Anything, int64(123), winnerAddress, int64(1900000000), "tx_finish_123", event.Timestamp).Return(nil)
 
 	// Expect user statistics updates
 	mockUserRepo.On("IncrementGamesPlayed", mock.Anything, winnerAddress).Return(nil)

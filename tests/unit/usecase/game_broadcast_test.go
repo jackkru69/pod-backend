@@ -2,15 +2,36 @@ package usecase_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
+
+type mockBroadcastConn struct {
+	messages      [][]byte
+	writeDeadline time.Time
+}
+
+func (m *mockBroadcastConn) WriteMessage(_ int, data []byte) error {
+	msgCopy := make([]byte, len(data))
+	copy(msgCopy, data)
+	m.messages = append(m.messages, msgCopy)
+	return nil
+}
+
+func (m *mockBroadcastConn) Close() error {
+	return nil
+}
+
+func (m *mockBroadcastConn) SetWriteDeadline(t time.Time) error {
+	m.writeDeadline = t
+	return nil
+}
 
 // TestBroadcastReservationCreated tests broadcasting reservation created events (T040)
 func TestBroadcastReservationCreated(t *testing.T) {
@@ -43,7 +64,7 @@ func TestBroadcastReservationReleased(t *testing.T) {
 		gameID int64
 		reason string
 	}{
-		{"Cancelled", 123, "cancelled"},
+		{"Canceled", 123, "cancelled"},
 		{"Expired", 456, "expired"},
 		{"Joined", 789, "joined"},
 	}
@@ -77,7 +98,7 @@ func TestBroadcastUseCase_ConcurrentAccess(t *testing.T) {
 	broadcastUC := usecase.NewGameBroadcastUseCase()
 
 	// Run multiple broadcasts concurrently
-	done := make(chan bool)
+	done := make(chan error)
 
 	for i := 0; i < 10; i++ {
 		go func(gameID int64) {
@@ -88,17 +109,23 @@ func TestBroadcastUseCase_ConcurrentAccess(t *testing.T) {
 				ExpiresAt:     time.Now().Add(60 * time.Second),
 				Status:        entity.ReservationStatusActive,
 			}
-			broadcastUC.BroadcastReservationCreated(ctx, reservation)
-			broadcastUC.BroadcastReservationReleased(ctx, gameID, "cancelled")
-			done <- true
+			if err := broadcastUC.BroadcastReservationCreated(ctx, reservation); err != nil {
+				done <- err
+				return
+			}
+			if err := broadcastUC.BroadcastReservationReleased(ctx, gameID, "cancelled"); err != nil {
+				done <- err
+				return
+			}
+			done <- nil
 		}(int64(i))
 	}
 
 	// Wait for all goroutines to complete
 	for i := 0; i < 10; i++ {
 		select {
-		case <-done:
-		// OK
+		case err := <-done:
+			require.NoError(t, err)
 		case <-time.After(5 * time.Second):
 			t.Fatal("Timeout waiting for concurrent broadcasts")
 		}
@@ -119,4 +146,71 @@ func TestReservationCreatedEvent_Format(t *testing.T) {
 	assert.Equal(t, "test_wallet", reservation.WalletAddress)
 	assert.Equal(t, entity.ReservationStatusActive, reservation.Status)
 	assert.True(t, reservation.IsActive())
+}
+
+func TestBroadcastGameUpdateWithEvent_IncludesTimestamp(t *testing.T) {
+	ctx := context.Background()
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+	conn := &mockBroadcastConn{}
+
+	broadcastUC.Subscribe(ctx, 123, "game-client", conn)
+
+	game := &entity.Game{
+		GameID:           123,
+		Status:           entity.GameStatusPaid,
+		PlayerOneAddress: "EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0t",
+		PlayerOneChoice:  entity.CoinSideHeads,
+		BetAmount:        1000000000,
+		InitTxHash:       "init-hash",
+		CreatedAt:        time.Now(),
+	}
+
+	err := broadcastUC.BroadcastGameUpdateWithEvent(ctx, game, usecase.GameEventTypeFinished)
+	require.NoError(t, err)
+	require.Len(t, conn.messages, 1)
+
+	var payload struct {
+		Type      string      `json:"type"`
+		Timestamp string      `json:"timestamp"`
+		EventType string      `json:"event_type"`
+		Data      entity.Game `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(conn.messages[0], &payload))
+
+	assert.Equal(t, usecase.MessageTypeGameStateUpdate, payload.Type)
+	assert.Equal(t, string(usecase.GameEventTypeFinished), payload.EventType)
+	assert.Equal(t, game.GameID, payload.Data.GameID)
+	_, err = time.Parse(time.RFC3339Nano, payload.Timestamp)
+	assert.NoError(t, err)
+}
+
+func TestBroadcastReservationEvents_IncludeTimestamp(t *testing.T) {
+	ctx := context.Background()
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+	conn := &mockBroadcastConn{}
+
+	broadcastUC.Subscribe(ctx, 123, "game-client", conn)
+
+	reservation := &entity.GameReservation{
+		GameID:        123,
+		WalletAddress: "EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0t",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(60 * time.Second),
+		Status:        entity.ReservationStatusActive,
+	}
+
+	require.NoError(t, broadcastUC.BroadcastReservationCreated(ctx, reservation))
+	require.NoError(t, broadcastUC.BroadcastReservationReleased(ctx, reservation.GameID, "joined"))
+	require.Len(t, conn.messages, 2)
+
+	for _, rawMessage := range conn.messages {
+		var payload struct {
+			Type      string `json:"type"`
+			Timestamp string `json:"timestamp"`
+		}
+		require.NoError(t, json.Unmarshal(rawMessage, &payload))
+		assert.NotEmpty(t, payload.Type)
+		_, err := time.Parse(time.RFC3339Nano, payload.Timestamp)
+		assert.NoError(t, err)
+	}
 }

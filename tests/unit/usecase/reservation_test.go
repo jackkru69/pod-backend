@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
+	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
@@ -18,6 +18,15 @@ const (
 	testWallet2 = "EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0u"
 	testWallet3 = "EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0v"
 )
+
+func generatedWalletAddress(seed byte) string {
+	data := make([]byte, 32)
+	for i := range data {
+		data[i] = seed
+	}
+
+	return address.NewAddress(0, 0, data).String()
+}
 
 // TestReserve_Success tests successful game reservation (T008)
 func TestReserve_Success(t *testing.T) {
@@ -132,6 +141,40 @@ func TestReserve_WalletAtLimit(t *testing.T) {
 	assert.ErrorIs(t, err, entity.ErrTooManyReservations)
 }
 
+func TestReserve_WalletAtLimit_WithEquivalentAddress(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockGameRepository)
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+
+	cfg := usecase.ReservationConfig{
+		MaxPerWallet:           1,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	}
+
+	uc := usecase.NewReservationUseCase(mockRepo, broadcastUC, cfg)
+	parsedWalletAddress := address.MustParseAddr(generatedWalletAddress(2))
+	bounceableWalletAddress := parsedWalletAddress.String()
+	nonBounceableWalletAddress := parsedWalletAddress.Bounce(false).String()
+
+	for i := int64(1); i <= 2; i++ {
+		game := &entity.Game{
+			GameID:           i,
+			Status:           entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress: testWallet1,
+			BetAmount:        1000000000,
+		}
+		mockRepo.On("GetByID", ctx, i).Return(game, nil).Twice()
+	}
+
+	_, err := uc.Reserve(ctx, 1, bounceableWalletAddress)
+	require.NoError(t, err)
+
+	_, err = uc.Reserve(ctx, 2, nonBounceableWalletAddress)
+
+	assert.ErrorIs(t, err, entity.ErrTooManyReservations)
+}
+
 // TestReserve_CannotReserveOwnGame tests reservation when wallet owns the game (T011)
 func TestReserve_CannotReserveOwnGame(t *testing.T) {
 	// Arrange
@@ -160,6 +203,35 @@ func TestReserve_CannotReserveOwnGame(t *testing.T) {
 	_, err := uc.Reserve(ctx, 123, testWallet1)
 
 	// Assert
+	assert.ErrorIs(t, err, entity.ErrCannotReserveOwnGame)
+}
+
+func TestReserve_CannotReserveOwnGame_WithEquivalentAddress(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockGameRepository)
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+
+	cfg := usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	}
+
+	uc := usecase.NewReservationUseCase(mockRepo, broadcastUC, cfg)
+	gameOwnerAddress := address.MustParseAddr(generatedWalletAddress(1))
+	equivalentWalletAddress := gameOwnerAddress.Bounce(false).String()
+
+	game := &entity.Game{
+		GameID:           123,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: gameOwnerAddress.String(),
+		BetAmount:        1000000000,
+	}
+
+	mockRepo.On("GetByID", ctx, int64(123)).Return(game, nil)
+
+	_, err := uc.Reserve(ctx, 123, equivalentWalletAddress)
+
 	assert.ErrorIs(t, err, entity.ErrCannotReserveOwnGame)
 }
 
@@ -356,6 +428,72 @@ func TestListByWallet_Empty(t *testing.T) {
 	assert.Empty(t, reservations)
 }
 
+func TestListByWallet_SkipsStaleReservationsAndSortsNewestFirst(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockGameRepository)
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+
+	cfg := usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	}
+
+	uc := usecase.NewReservationUseCase(mockRepo, broadcastUC, cfg)
+
+	activeGame := &entity.Game{
+		GameID:           1,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: testWallet1,
+		BetAmount:        1000000000,
+	}
+	waitingGame := &entity.Game{
+		GameID:           2,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: testWallet1,
+		BetAmount:        1000000000,
+	}
+	staleGame := &entity.Game{
+		GameID:           2,
+		Status:           entity.GameStatusWaitingForOpenBids,
+		PlayerOneAddress: testWallet1,
+		PlayerTwoAddress: func() *string {
+			value := testWallet3
+			return &value
+		}(),
+		BetAmount: 1000000000,
+	}
+	newerGame := &entity.Game{
+		GameID:           3,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: testWallet1,
+		BetAmount:        1000000000,
+	}
+
+	mockRepo.On("GetByID", ctx, int64(1)).Return(activeGame, nil).Twice()
+	mockRepo.On("GetByID", ctx, int64(2)).Return(waitingGame, nil).Once()
+	mockRepo.On("GetByID", ctx, int64(2)).Return(staleGame, nil).Once()
+	mockRepo.On("GetByID", ctx, int64(3)).Return(newerGame, nil).Twice()
+
+	_, err := uc.Reserve(ctx, 1, testWallet2)
+	require.NoError(t, err)
+	_, err = uc.Reserve(ctx, 2, testWallet2)
+	require.NoError(t, err)
+	_, err = uc.Reserve(ctx, 3, testWallet2)
+	require.NoError(t, err)
+
+	reservations, err := uc.ListByWallet(ctx, testWallet2)
+	require.NoError(t, err)
+	require.Len(t, reservations, 2)
+	assert.Equal(t, int64(3), reservations[0].GameID)
+	assert.Equal(t, int64(1), reservations[1].GameID)
+
+	staleReservation, err := uc.GetReservation(ctx, 2)
+	require.NoError(t, err)
+	assert.Nil(t, staleReservation)
+	mockRepo.AssertExpectations(t)
+}
+
 // ==============================================================================
 // User Story 2 Tests: Automatic Reservation Release
 // ==============================================================================
@@ -444,6 +582,42 @@ func TestCancel_NotHolder(t *testing.T) {
 	// Verify reservation still exists
 	reservation, _ := uc.GetReservation(ctx, 123)
 	assert.NotNil(t, reservation)
+}
+
+func TestCancel_Success_WithEquivalentAddress(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockGameRepository)
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+
+	cfg := usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	}
+
+	uc := usecase.NewReservationUseCase(mockRepo, broadcastUC, cfg)
+	parsedWalletAddress := address.MustParseAddr(generatedWalletAddress(2))
+	bounceableWalletAddress := parsedWalletAddress.String()
+	nonBounceableWalletAddress := parsedWalletAddress.Bounce(false).String()
+
+	game := &entity.Game{
+		GameID:           123,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: testWallet1,
+		BetAmount:        1000000000,
+	}
+
+	mockRepo.On("GetByID", ctx, int64(123)).Return(game, nil)
+
+	_, err := uc.Reserve(ctx, 123, bounceableWalletAddress)
+	require.NoError(t, err)
+
+	err = uc.Cancel(ctx, 123, nonBounceableWalletAddress)
+
+	require.NoError(t, err)
+	reservation, getErr := uc.GetReservation(ctx, 123)
+	require.NoError(t, getErr)
+	assert.Nil(t, reservation)
 }
 
 // TestCancel_NotFound tests cancellation when no reservation exists

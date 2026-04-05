@@ -207,7 +207,6 @@ func TestGameListLoad_HighConcurrency(t *testing.T) {
 
 					url := fmt.Sprintf("%s%s?status=1&limit=50", baseURL, gameListEndpoint)
 					resp, err := client.Get(url)
-
 					if err != nil {
 						atomic.AddInt64(&errorCount, 1)
 						continue

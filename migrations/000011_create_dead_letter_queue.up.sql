@@ -1,7 +1,7 @@
 -- Migration: Create dead_letter_queue table for failed transaction storage
 -- This enables retry and analysis of failed blockchain event parsing (Issue #6)
 
-CREATE TABLE dead_letter_queue (
+CREATE TABLE IF NOT EXISTS dead_letter_queue (
     id                BIGSERIAL PRIMARY KEY,
     transaction_hash  VARCHAR(66) NOT NULL,
     transaction_lt    VARCHAR(50) NOT NULL,
@@ -20,13 +20,13 @@ CREATE TABLE dead_letter_queue (
 );
 
 -- Indexes for efficient querying
-CREATE INDEX idx_dlq_status ON dead_letter_queue(status);
-CREATE INDEX idx_dlq_next_retry ON dead_letter_queue(next_retry_at) WHERE status IN ('pending', 'retrying');
-CREATE INDEX idx_dlq_transaction_hash ON dead_letter_queue(transaction_hash);
-CREATE INDEX idx_dlq_created_at ON dead_letter_queue(created_at);
+CREATE INDEX IF NOT EXISTS idx_dlq_status ON dead_letter_queue(status);
+CREATE INDEX IF NOT EXISTS idx_dlq_next_retry ON dead_letter_queue(next_retry_at) WHERE status IN ('pending', 'retrying');
+CREATE INDEX IF NOT EXISTS idx_dlq_transaction_hash ON dead_letter_queue(transaction_hash);
+CREATE INDEX IF NOT EXISTS idx_dlq_created_at ON dead_letter_queue(created_at);
 
 -- Unique constraint to prevent duplicate entries for same transaction
-CREATE UNIQUE INDEX idx_dlq_unique_tx ON dead_letter_queue(transaction_hash, transaction_lt) 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dlq_unique_tx ON dead_letter_queue(transaction_hash, transaction_lt) 
     WHERE status IN ('pending', 'retrying');
 
 COMMENT ON TABLE dead_letter_queue IS 'Stores failed blockchain transactions for retry and analysis';

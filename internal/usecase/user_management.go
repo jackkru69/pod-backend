@@ -51,6 +51,9 @@ func (uc *UserManagementUseCase) GetUserByWallet(ctx context.Context, walletAddr
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user by wallet: %w", err)
 	}
+	if user == nil {
+		return nil, fmt.Errorf("failed to get user by wallet: user not found")
+	}
 
 	return user, nil
 }
@@ -66,6 +69,9 @@ func (uc *UserManagementUseCase) GetReferralStats(ctx context.Context, walletAdd
 	stats, err := uc.userRepo.GetReferralStats(ctx, walletAddress)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get referral stats: %w", err)
+	}
+	if stats == nil {
+		return nil, fmt.Errorf("failed to get referral stats: empty referral stats")
 	}
 
 	return stats, nil

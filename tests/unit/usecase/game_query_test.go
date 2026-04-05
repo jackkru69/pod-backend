@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
+	"github.com/stretchr/testify/require"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
 )
@@ -164,6 +164,126 @@ func TestGameQueryUseCase_ListGames(t *testing.T) {
 		// After offset of 1, should get games[1] and games[2]
 		assert.Equal(t, int64(2), games[0].GameID)
 		assert.Equal(t, int64(3), games[1].GameID)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("should include paid games when filtering ended for compatibility", func(t *testing.T) {
+		mockRepo := new(MockGameRepository)
+		ctx := context.Background()
+
+		endedGames := []*entity.Game{
+			{GameID: 1, Status: entity.GameStatusEnded, CreatedAt: time.Unix(100, 0)},
+		}
+		paidGames := []*entity.Game{
+			{GameID: 2, Status: entity.GameStatusPaid, CreatedAt: time.Unix(200, 0)},
+		}
+
+		mockRepo.On("GetByStatus", ctx, entity.GameStatusEnded).Return(endedGames, nil).Once()
+		mockRepo.On("GetByStatus", ctx, entity.GameStatusPaid).Return(paidGames, nil).Once()
+
+		uc := usecase.NewGameQueryUseCase(mockRepo)
+
+		games, err := uc.ListGames(ctx, entity.GameStatusEnded, 20, 0)
+
+		assert.NoError(t, err)
+		assert.Len(t, games, 2)
+		assert.Equal(t, int64(2), games[0].GameID)
+		assert.Equal(t, int64(1), games[1].GameID)
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestGameQueryUseCase_GetGamesByPlayerPage(t *testing.T) {
+	t.Run("should return paginated player history with the full total", func(t *testing.T) {
+		mockRepo := new(MockGameRepository)
+		ctx := context.Background()
+
+		allGames := []*entity.Game{
+			{GameID: 5, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+			{GameID: 4, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+			{GameID: 3, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+			{GameID: 2, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+			{GameID: 1, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+		}
+		walletAddress := "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"
+
+		mockRepo.On("GetByPlayerAddress", ctx, walletAddress).Return(allGames, nil).Once()
+
+		uc := usecase.NewGameQueryUseCase(mockRepo)
+
+		games, total, err := uc.GetGamesByPlayerPage(ctx, walletAddress, 2, 1)
+
+		assert.NoError(t, err)
+		assert.Len(t, games, 2)
+		assert.Equal(t, 5, total)
+		assert.Equal(t, int64(4), games[0].GameID)
+		assert.Equal(t, int64(3), games[1].GameID)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("should preserve full total when page is beyond the available history", func(t *testing.T) {
+		mockRepo := new(MockGameRepository)
+		ctx := context.Background()
+
+		allGames := []*entity.Game{
+			{GameID: 2, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+			{GameID: 1, PlayerOneAddress: "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"},
+		}
+		walletAddress := "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"
+
+		mockRepo.On("GetByPlayerAddress", ctx, walletAddress).Return(allGames, nil).Once()
+
+		uc := usecase.NewGameQueryUseCase(mockRepo)
+
+		games, total, err := uc.GetGamesByPlayerPage(ctx, walletAddress, 20, 5)
+
+		assert.NoError(t, err)
+		assert.Empty(t, games)
+		assert.Equal(t, 2, total)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("should order history by the most recent lifecycle timestamp", func(t *testing.T) {
+		mockRepo := new(MockGameRepository)
+		ctx := context.Background()
+		walletAddress := "EQAbcdefghijklmnopqrstuvwxyz0123456789ABCDEFGH"
+
+		createdFirst := time.Date(2026, 4, 4, 10, 0, 0, 0, time.UTC)
+		joinedRecently := createdFirst.Add(4 * time.Hour)
+		completedLatest := createdFirst.Add(6 * time.Hour)
+
+		gamesForWallet := []*entity.Game{
+			{
+				GameID:           1,
+				PlayerOneAddress: walletAddress,
+				CreatedAt:        createdFirst,
+			},
+			{
+				GameID:           2,
+				PlayerOneAddress: walletAddress,
+				CreatedAt:        createdFirst.Add(30 * time.Minute),
+				JoinedAt:         &joinedRecently,
+			},
+			{
+				GameID:           3,
+				PlayerOneAddress: walletAddress,
+				CreatedAt:        createdFirst.Add(time.Hour),
+				CompletedAt:      &completedLatest,
+			},
+		}
+
+		mockRepo.On("GetByPlayerAddress", ctx, walletAddress).Return(gamesForWallet, nil).Once()
+
+		uc := usecase.NewGameQueryUseCase(mockRepo)
+
+		games, total, err := uc.GetGamesByPlayerPage(ctx, walletAddress, 10, 0)
+
+		assert.NoError(t, err)
+		assert.Equal(t, 3, total)
+		require.Len(t, games, 3)
+		assert.Equal(t, int64(3), games[0].GameID)
+		assert.Equal(t, int64(2), games[1].GameID)
+		assert.Equal(t, int64(1), games[2].GameID)
 		mockRepo.AssertExpectations(t)
 	})
 }

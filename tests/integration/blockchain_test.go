@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/toncenter"
 	repopg "pod-backend/internal/repository/postgres"
@@ -260,7 +259,7 @@ func TestBlockchainEventProcessing_Integration(t *testing.T) {
 		// Verify game was completed
 		game, err := gameRepo.GetByID(ctx, 1)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusEnded, game.Status)
+		assert.Equal(t, entity.GameStatusPaid, game.Status)
 		assert.NotNil(t, game.WinnerAddress)
 		assert.Equal(t, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2", *game.WinnerAddress)
 	})
@@ -431,7 +430,7 @@ func TestFullGameLifecycle_Integration(t *testing.T) {
 
 		game, err := gameRepo.GetByID(ctx, gameID)
 		require.NoError(t, err)
-		assert.Equal(t, entity.GameStatusEnded, game.Status)
+		assert.Equal(t, entity.GameStatusPaid, game.Status)
 		assert.NotNil(t, game.WinnerAddress)
 		assert.Equal(t, user1.WalletAddress, *game.WinnerAddress)
 
