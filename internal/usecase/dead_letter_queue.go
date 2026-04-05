@@ -11,6 +11,31 @@ import (
 	"pod-backend/pkg/logger"
 )
 
+const (
+	defaultDLQBaseBackoff = 5 * time.Minute
+	defaultDLQMaxRetries  = 3
+)
+
+// DLQStoreOutcome describes how a failed transaction was handled by the DLQ.
+type DLQStoreOutcome string
+
+const (
+	DLQStoreOutcomeQueued         DLQStoreOutcome = "queued"
+	DLQStoreOutcomeAlreadyPending DLQStoreOutcome = "already_pending"
+)
+
+// StoreFailedTransactionResult captures the explicit DLQ outcome for a failed transaction.
+type StoreFailedTransactionResult struct {
+	Outcome         DLQStoreOutcome     `json:"outcome"`
+	EntryID         int64               `json:"entry_id,omitempty"`
+	Status          entity.DLQStatus    `json:"status"`
+	ErrorType       entity.DLQErrorType `json:"error_type"`
+	RetryCount      int                 `json:"retry_count"`
+	MaxRetries      int                 `json:"max_retries"`
+	NextRetryAt     *time.Time          `json:"next_retry_at,omitempty"`
+	ResolutionNotes string              `json:"resolution_notes,omitempty"`
+}
+
 // DeadLetterQueueUseCase handles failed transaction storage and retry (Issue #6).
 type DeadLetterQueueUseCase struct {
 	dlqRepo     repository.DeadLetterQueueRepository
@@ -18,15 +43,21 @@ type DeadLetterQueueUseCase struct {
 	baseBackoff time.Duration
 }
 
+// DeadLetterQueueObservability captures queue backlog and retry posture in one place.
+type DeadLetterQueueObservability struct {
+	BaseBackoff time.Duration        `json:"base_backoff"`
+	Stats       *repository.DLQStats `json:"stats"`
+}
+
 // NewDeadLetterQueueUseCase creates a new DLQ use case.
 func NewDeadLetterQueueUseCase(
 	dlqRepo repository.DeadLetterQueueRepository,
-	logger logger.Interface,
+	log logger.Interface,
 ) *DeadLetterQueueUseCase {
 	return &DeadLetterQueueUseCase{
 		dlqRepo:     dlqRepo,
-		logger:      logger,
-		baseBackoff: 5 * time.Minute, // Default: 5 minutes base backoff
+		logger:      log,
+		baseBackoff: defaultDLQBaseBackoff,
 	}
 }
 
@@ -42,7 +73,7 @@ func (uc *DeadLetterQueueUseCase) StoreFailedTransaction(
 	tx toncenter.Transaction,
 	err error,
 	errorType entity.DLQErrorType,
-) error {
+) (*StoreFailedTransactionResult, error) {
 	// Serialize transaction data
 	rawData, marshalErr := serializeTransaction(tx)
 	if marshalErr != nil {
@@ -58,8 +89,9 @@ func (uc *DeadLetterQueueUseCase) StoreFailedTransaction(
 		ErrorMessage:    err.Error(),
 		ErrorType:       errorType,
 		RetryCount:      0,
-		MaxRetries:      3,
+		MaxRetries:      defaultDLQMaxRetries,
 		Status:          entity.DLQStatusPending,
+		ResolutionNotes: pendingDLQResolutionNotes(errorType),
 	}
 
 	// Schedule first retry
@@ -68,13 +100,44 @@ func (uc *DeadLetterQueueUseCase) StoreFailedTransaction(
 	if createErr := uc.dlqRepo.Create(ctx, entry); createErr != nil {
 		uc.logger.Error("Failed to store transaction in DLQ: tx=%s, error=%v",
 			tx.Hash(), createErr)
-		return createErr
+		return nil, createErr
 	}
 
-	uc.logger.Warn("Transaction stored in DLQ: tx=%s, lt=%s, error_type=%s, error=%s",
-		tx.Hash(), tx.Lt(), errorType, err.Error())
+	if entry.ID == 0 {
+		existingEntry, getErr := uc.dlqRepo.GetByTransactionHash(ctx, tx.Hash(), tx.Lt())
+		if getErr != nil {
+			return nil, getErr
+		}
+		if existingEntry != nil {
+			uc.logger.Warn(
+				"Transaction already pending in DLQ: tx=%s, lt=%s, error_type=%s, retry_count=%d/%d, next_retry_at=%v",
+				tx.Hash(),
+				tx.Lt(),
+				existingEntry.ErrorType,
+				existingEntry.RetryCount,
+				existingEntry.MaxRetries,
+				existingEntry.NextRetryAt,
+			)
+			return newStoreFailedTransactionResult(DLQStoreOutcomeAlreadyPending, existingEntry), nil
+		}
 
-	return nil
+		uc.logger.Warn("Transaction already pending in DLQ: tx=%s, lt=%s, error_type=%s",
+			tx.Hash(), tx.Lt(), errorType)
+		return newStoreFailedTransactionResult(DLQStoreOutcomeAlreadyPending, entry), nil
+	}
+
+	uc.logger.Warn(
+		"Transaction stored in DLQ: tx=%s, lt=%s, error_type=%s, retry_count=%d/%d, next_retry_at=%v, error=%s",
+		tx.Hash(),
+		tx.Lt(),
+		errorType,
+		entry.RetryCount,
+		entry.MaxRetries,
+		entry.NextRetryAt,
+		err.Error(),
+	)
+
+	return newStoreFailedTransactionResult(DLQStoreOutcomeQueued, entry), nil
 }
 
 // GetPendingForRetry retrieves entries that are ready for retry.
@@ -120,6 +183,19 @@ func (uc *DeadLetterQueueUseCase) MarkFailed(ctx context.Context, id int64, note
 // GetStats returns DLQ statistics for monitoring.
 func (uc *DeadLetterQueueUseCase) GetStats(ctx context.Context) (*repository.DLQStats, error) {
 	return uc.dlqRepo.GetStats(ctx)
+}
+
+// GetObservability returns queue backlog, retry posture, and backoff configuration.
+func (uc *DeadLetterQueueUseCase) GetObservability(ctx context.Context) (*DeadLetterQueueObservability, error) {
+	stats, err := uc.dlqRepo.GetStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return &DeadLetterQueueObservability{
+		BaseBackoff: uc.baseBackoff,
+		Stats:       stats,
+	}, nil
 }
 
 // GetByStatus retrieves entries by status with pagination.
@@ -172,4 +248,45 @@ func serializeTransaction(tx toncenter.Transaction) (string, error) {
 		return "", err
 	}
 	return string(bytes), nil
+}
+
+func pendingDLQResolutionNotes(errorType entity.DLQErrorType) string {
+	switch errorType {
+	case entity.DLQErrorTypeParse:
+		return "queued after parse failure"
+	case entity.DLQErrorTypeValidation:
+		return "queued after validation failure"
+	case entity.DLQErrorTypePersistence:
+		return "queued after persistence retries exhausted"
+	default:
+		return "queued after unknown failure"
+	}
+}
+
+func newStoreFailedTransactionResult(
+	outcome DLQStoreOutcome,
+	entry *entity.DeadLetterEntry,
+) *StoreFailedTransactionResult {
+	result := &StoreFailedTransactionResult{
+		Outcome:         outcome,
+		Status:          entity.DLQStatusPending,
+		ErrorType:       entity.DLQErrorTypeUnknown,
+		ResolutionNotes: "",
+	}
+	if entry == nil {
+		return result
+	}
+
+	result.EntryID = entry.ID
+	result.Status = entry.Status
+	result.ErrorType = entry.ErrorType
+	result.RetryCount = entry.RetryCount
+	result.MaxRetries = entry.MaxRetries
+	result.ResolutionNotes = entry.ResolutionNotes
+	if entry.NextRetryAt != nil {
+		nextRetryAt := *entry.NextRetryAt
+		result.NextRetryAt = &nextRetryAt
+	}
+
+	return result
 }

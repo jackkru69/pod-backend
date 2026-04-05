@@ -3,14 +3,16 @@ package usecase_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
-
+	"github.com/stretchr/testify/mock"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/toncenter"
+	"pod-backend/internal/repository"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 )
@@ -451,4 +453,301 @@ func TestBlockchainSubscriberUseCase_GetEventSourceType(t *testing.T) {
 
 	// Assert
 	assert.Equal(t, toncenter.SourceTypeHTTP, sourceType)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_ParseFailureObservable(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockDLQRepo := new(MockDeadLetterQueueRepository)
+
+	dlqUC := usecase.NewDeadLetterQueueUseCase(mockDLQRepo, mockLogger)
+	dlqUC.SetBaseBackoff(time.Millisecond)
+
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	uc.SetDeadLetterQueue(dlqUC)
+
+	mockDLQRepo.
+		On("Create", mock.Anything, mock.MatchedBy(func(entry *entity.DeadLetterEntry) bool {
+			return entry.TransactionHash == "test_hash_invalid" &&
+				entry.TransactionLt == "123456" &&
+				entry.ErrorType == entity.DLQErrorTypeParse &&
+				entry.Status == entity.DLQStatusPending
+		})).
+		Run(func(args mock.Arguments) {
+			entry := args.Get(1).(*entity.DeadLetterEntry)
+			entry.ID = 1
+			entry.CreatedAt = time.Now()
+		}).
+		Return(nil).
+		Once()
+
+	tx := toncenter.Transaction{
+		Type: "raw.transaction",
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Type: "internal.transactionId",
+			Lt:   "123456",
+			Hash: "test_hash_invalid",
+		},
+		Utime: time.Now().Unix(),
+		InMsg: []byte("{invalid json"),
+	}
+
+	err := uc.HandleTransaction(context.Background(), tx)
+
+	assert.NoError(t, err)
+
+	snapshot := uc.GetObservabilitySnapshot()
+	assert.Equal(t, uint64(1), snapshot.ParseFailuresTotal)
+	assert.Equal(t, uint64(0), snapshot.ValidationFailuresTotal)
+	assert.Equal(t, uint64(1), snapshot.DLQStoreAttemptsTotal)
+	assert.Equal(t, uint64(1), snapshot.DLQStoredTotal)
+	assert.Equal(t, uint64(0), snapshot.DLQDuplicateTotal)
+	assert.Equal(t, uint64(0), snapshot.DLQStoreFailuresTotal)
+	assert.Equal(t, entity.DLQErrorTypeParse, snapshot.LastFailureType)
+	assert.Equal(t, "test_hash_invalid", snapshot.LastFailureTxHash)
+	assert.Equal(t, "123456", snapshot.LastFailureTxLt)
+	assert.Equal(t, entity.DLQErrorTypeParse, snapshot.LastDLQErrorType)
+	assert.Equal(t, usecase.DLQStoreOutcomeQueued, snapshot.LastDLQStoreOutcome)
+	assert.Equal(t, entity.DLQStatusPending, snapshot.LastDLQStatus)
+	assert.Equal(t, "queued after parse failure", snapshot.LastDLQResolutionNotes)
+	assert.Equal(t, "test_hash_invalid", snapshot.LastDLQStoredTxHash)
+	assert.Equal(t, "123456", snapshot.LastDLQStoredTxLt)
+	assert.NotNil(t, snapshot.LastFailureAt)
+	assert.NotNil(t, snapshot.LastDLQStoredAt)
+
+	mockDLQRepo.AssertExpectations(t)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_PersistenceRetryObservable(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockDLQRepo := new(MockDeadLetterQueueRepository)
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
+
+	persistenceUC := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
+	dlqUC := usecase.NewDeadLetterQueueUseCase(mockDLQRepo, mockLogger)
+	dlqUC.SetBaseBackoff(time.Millisecond)
+
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, persistenceUC, mockLogger)
+	uc.SetRetryConfig(usecase.RetryConfig{
+		MaxRetries:        2,
+		InitialBackoff:    time.Millisecond,
+		MaxBackoff:        time.Millisecond,
+		BackoffMultiplier: 2,
+	})
+	uc.SetDeadLetterQueue(dlqUC)
+
+	persistenceErr := errors.New("database unavailable")
+	mockUserRepo.
+		On("EnsureUserByWallet", mock.Anything, "0:abc123").
+		Return(persistenceErr).
+		Times(3)
+
+	mockDLQRepo.
+		On("Create", mock.Anything, mock.MatchedBy(func(entry *entity.DeadLetterEntry) bool {
+			return entry.TransactionHash == "test_hash_123" &&
+				entry.TransactionLt == "123456" &&
+				entry.ErrorType == entity.DLQErrorTypePersistence &&
+				entry.Status == entity.DLQStatusPending
+		})).
+		Run(func(args mock.Arguments) {
+			entry := args.Get(1).(*entity.DeadLetterEntry)
+			entry.ID = 99
+			entry.CreatedAt = time.Now()
+		}).
+		Return(nil).
+		Once()
+
+	err := uc.HandleTransaction(context.Background(), createTestTransaction(entity.EventTypeGameInitialized, 1))
+
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "failed to route event")
+
+	snapshot := uc.GetObservabilitySnapshot()
+	assert.Equal(t, uint64(2), snapshot.PersistenceRetryAttemptsTotal)
+	assert.Equal(t, uint64(0), snapshot.PersistenceRetryRecoveredTotal)
+	assert.Equal(t, uint64(1), snapshot.PersistenceFailuresExhausted)
+	assert.Equal(t, uint64(1), snapshot.DLQStoreAttemptsTotal)
+	assert.Equal(t, uint64(1), snapshot.DLQStoredTotal)
+	assert.Equal(t, uint64(0), snapshot.DLQDuplicateTotal)
+	assert.Equal(t, uint64(0), snapshot.DLQStoreFailuresTotal)
+	assert.Equal(t, entity.DLQErrorTypePersistence, snapshot.LastFailureType)
+	assert.Equal(t, "exhausted", snapshot.LastRetryOutcome)
+	assert.Equal(t, entity.EventTypeGameInitialized, snapshot.LastRetriedEventType)
+	assert.Equal(t, int64(1), snapshot.LastRetriedGameID)
+	assert.Equal(t, entity.DLQErrorTypePersistence, snapshot.LastDLQErrorType)
+	assert.Equal(t, usecase.DLQStoreOutcomeQueued, snapshot.LastDLQStoreOutcome)
+	assert.Equal(t, entity.DLQStatusPending, snapshot.LastDLQStatus)
+	assert.Equal(t, "queued after persistence retries exhausted", snapshot.LastDLQResolutionNotes)
+	assert.Equal(t, "test_hash_123", snapshot.LastDLQStoredTxHash)
+	assert.Equal(t, "123456", snapshot.LastDLQStoredTxLt)
+	assert.NotNil(t, snapshot.LastRetryAttemptAt)
+	assert.NotNil(t, snapshot.LastExhaustedRetryAt)
+	assert.NotNil(t, snapshot.LastDLQStoredAt)
+
+	mockUserRepo.AssertExpectations(t)
+	mockDLQRepo.AssertExpectations(t)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_PersistenceRetryRecoveredObservable(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
+
+	persistenceUC := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, persistenceUC, mockLogger)
+	uc.SetRetryConfig(usecase.RetryConfig{
+		MaxRetries:        2,
+		InitialBackoff:    time.Millisecond,
+		MaxBackoff:        time.Millisecond,
+		BackoffMultiplier: 2,
+	})
+
+	persistenceErr := errors.New("database unavailable")
+	mockUserRepo.
+		On("EnsureUserByWallet", mock.Anything, "0:abc123").
+		Return(persistenceErr).
+		Once()
+	mockUserRepo.
+		On("EnsureUserByWallet", mock.Anything, "0:abc123").
+		Return(nil).
+		Once()
+	mockGameRepo.
+		On("CreateOrIgnore", mock.Anything, mock.AnythingOfType("*entity.Game")).
+		Return(true, nil).
+		Once()
+	mockEventRepo.
+		On("Upsert", mock.Anything, mock.AnythingOfType("*entity.GameEvent")).
+		Run(func(args mock.Arguments) {
+			event := args.Get(1).(*entity.GameEvent)
+			event.ID = 1
+		}).
+		Return(nil).
+		Once()
+
+	err := uc.HandleTransaction(context.Background(), createTestTransaction(entity.EventTypeGameInitialized, 1))
+
+	assert.NoError(t, err)
+
+	snapshot := uc.GetObservabilitySnapshot()
+	assert.Equal(t, uint64(1), snapshot.PersistenceRetryAttemptsTotal)
+	assert.Equal(t, uint64(1), snapshot.PersistenceRetryRecoveredTotal)
+	assert.Equal(t, uint64(0), snapshot.PersistenceFailuresExhausted)
+	assert.Equal(t, "recovered", snapshot.LastRetryOutcome)
+	assert.Equal(t, entity.EventTypeGameInitialized, snapshot.LastRetriedEventType)
+	assert.Equal(t, int64(1), snapshot.LastRetriedGameID)
+	assert.NotNil(t, snapshot.LastRetryAttemptAt)
+	assert.Nil(t, snapshot.LastExhaustedRetryAt)
+
+	mockUserRepo.AssertExpectations(t)
+	mockGameRepo.AssertExpectations(t)
+	mockEventRepo.AssertExpectations(t)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_ParseFailureDLQDuplicateObservable(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockDLQRepo := new(MockDeadLetterQueueRepository)
+
+	dlqUC := usecase.NewDeadLetterQueueUseCase(mockDLQRepo, mockLogger)
+	dlqUC.SetBaseBackoff(time.Millisecond)
+
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	uc.SetDeadLetterQueue(dlqUC)
+
+	existingNextRetryAt := time.Now().Add(time.Minute)
+	existingEntry := &entity.DeadLetterEntry{
+		ID:              7,
+		TransactionHash: "test_hash_invalid",
+		TransactionLt:   "123456",
+		ErrorType:       entity.DLQErrorTypeParse,
+		RetryCount:      1,
+		MaxRetries:      3,
+		Status:          entity.DLQStatusPending,
+		NextRetryAt:     &existingNextRetryAt,
+		ResolutionNotes: "queued after parse failure",
+	}
+
+	mockDLQRepo.
+		On("Create", mock.Anything, mock.AnythingOfType("*entity.DeadLetterEntry")).
+		Return(nil).
+		Once()
+	mockDLQRepo.
+		On("GetByTransactionHash", mock.Anything, "test_hash_invalid", "123456").
+		Return(existingEntry, nil).
+		Once()
+
+	tx := toncenter.Transaction{
+		Type: "raw.transaction",
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Type: "internal.transactionId",
+			Lt:   "123456",
+			Hash: "test_hash_invalid",
+		},
+		Utime: time.Now().Unix(),
+		InMsg: []byte("{invalid json"),
+	}
+
+	err := uc.HandleTransaction(context.Background(), tx)
+
+	assert.NoError(t, err)
+
+	snapshot := uc.GetObservabilitySnapshot()
+	assert.Equal(t, uint64(1), snapshot.DLQStoreAttemptsTotal)
+	assert.Equal(t, uint64(0), snapshot.DLQStoredTotal)
+	assert.Equal(t, uint64(1), snapshot.DLQDuplicateTotal)
+	assert.Equal(t, usecase.DLQStoreOutcomeAlreadyPending, snapshot.LastDLQStoreOutcome)
+	assert.Equal(t, entity.DLQStatusPending, snapshot.LastDLQStatus)
+	assert.Equal(t, "queued after parse failure", snapshot.LastDLQResolutionNotes)
+	assert.Equal(t, "test_hash_invalid", snapshot.LastDLQStoredTxHash)
+	assert.Equal(t, "123456", snapshot.LastDLQStoredTxLt)
+	assert.NotNil(t, snapshot.LastDLQStoredAt)
+
+	mockDLQRepo.AssertExpectations(t)
+}
+
+func TestDeadLetterQueueUseCase_GetObservability(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockDLQRepo := new(MockDeadLetterQueueRepository)
+	uc := usecase.NewDeadLetterQueueUseCase(mockDLQRepo, mockLogger)
+	uc.SetBaseBackoff(2 * time.Minute)
+
+	now := time.Now()
+	expectedStats := &repository.DLQStats{
+		PendingCount:          3,
+		RetryingCount:         1,
+		ResolvedCount:         2,
+		FailedCount:           1,
+		TotalCount:            7,
+		ParseErrorCount:       2,
+		PersistenceErrorCount: 3,
+		ValidationErrorCount:  1,
+		UnknownErrorCount:     1,
+		ReadyForRetryCount:    2,
+		ExhaustedRetryCount:   1,
+		OldestPending:         &now,
+		NextScheduledRetryAt:  &now,
+	}
+
+	mockDLQRepo.On("GetStats", mock.Anything).Return(expectedStats, nil).Once()
+
+	observability, err := uc.GetObservability(context.Background())
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, observability.BaseBackoff)
+	assert.Equal(t, expectedStats, observability.Stats)
+
+	mockDLQRepo.AssertExpectations(t)
 }

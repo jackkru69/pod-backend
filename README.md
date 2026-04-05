@@ -1,279 +1,346 @@
-# Pod Game Backend
+# POD Game Backend
 
-Real-time blockchain game backend with WebSocket support for TON blockchain coin flip gambling application.
+Go backend for the POD Game contract-led TON coin flip platform.
 
-## Features
+## Overview
 
-- ✅ **REST API** - Game listing, user profiles, game history
-- ✅ **WebSocket** - Real-time game state updates
-- ✅ **Blockchain Integration** - TON blockchain event subscription and persistence
-- ✅ **Swagger/OpenAPI** - Auto-generated API documentation at `/swagger`
-- ✅ **Prometheus Metrics** - Comprehensive monitoring at `/metrics`
-- ✅ **Health Checks** - Service health endpoint at `/health`
-- ✅ **Circuit Breaker** - Resilient TON Center API integration
-- ✅ **Rate Limiting** - Request throttling per user
-- ✅ **CORS** - Cross-origin support for Telegram Mini Apps
-- ✅ **Referral System** - Track and reward user referrals
+`pod-backend` is responsible for exposing REST and WebSocket interfaces,
+subscribing to TON blockchain events, persisting indexed state in PostgreSQL,
+and serving operational endpoints such as health checks, metrics, and Swagger.
+
+## Source of Truth and References
+
+- The rewritten TON contracts in `../pod-contract/` are the **source of truth**
+  for gameplay semantics, statuses, payout logic, and message flow.
+- The original projects at
+  `/home/jackkru69/Documents/profiterole-flipcoin-frontend` and
+  `/home/jackkru69/Documents/flipcoin-backend` are **behavioral/product
+  references** only.
+- Use the reference repos to understand flows and expected behavior, but do not
+  port their React/Redux or FastAPI/SQLAlchemy/Celery implementation patterns
+  into this Go backend.
+- If a reference conflicts with the current TON contracts, the TON contracts win
+  and this backend must adapt explicitly.
+
+## Backend Responsibilities
+
+- Serve REST API for games, reservations, user profiles, history, and referrals
+- Serve WebSocket updates for global and per-game subscriptions
+- Subscribe to TON Center events and persist blockchain-derived state
+- Expose health, metrics, and Swagger/OpenAPI surfaces
+- Enforce validation, rate limiting, and Telegram Mini App integration rules
+
+## Stack
+
+- Go 1.25
+- Fiber v2
+- PostgreSQL + `pgx`
+- `squirrel` query builder (no ORM)
+- `go-playground/validator/v10`
+- TON Center integration
+- Prometheus metrics + Swagger generation
 
 ## Quick Start
 
-### Prerequisites
+### 1. Configure environment
 
-- Go 1.21+
-- PostgreSQL 15+
-- TON Center API access (or local node)
+Copy `.env.example` to `.env` and adjust the placeholders before running the
+service.
 
-### Installation
+```bash
+cp .env.example .env
+```
 
-1. Install dependencies:
+Important: `.env.example` is already tuned for the local quickstart flow. Make
+sure at least the following are correct for your local environment:
+
+- `HTTP_PORT`
+- `PG_URL`
+- `RMQ_URL`
+- `NATS_URL`
+- `BLOCKCHAIN_EVENT_SOURCE`
+- `BLOCKCHAIN_RESUME_FROM_CHECKPOINT`
+- `BLOCKCHAIN_RESUME_EVENT_SOURCE`
+- `TON_CENTER_V2_URL`
+- `TON_CENTER_V3_WS_URL`
+- `TON_GAME_CONTRACT_ADDRESS`
+- `TELEGRAM_BOT_TOKEN`
+
+### 2. Start local infrastructure
+
+```bash
+make compose-up
+```
+
+This starts Postgres, RabbitMQ, and NATS, then tails logs.
+
+For host-run development, the compose stack exposes:
+
+- Postgres on `localhost:5433`
+- RabbitMQ on `localhost:5672`
+- NATS on `localhost:4223`
+
+### 3. Run the backend
+
 ```bash
 go mod download
+go run cmd/app/main.go
 ```
 
-2. Set up PostgreSQL:
-```bash
-# Start PostgreSQL (using Docker Compose)
-docker-compose -f docker-compose.dev.yaml up -d
+For a fuller dev flow that also regenerates Swagger/proto artifacts, you can
+use:
 
-# Run migrations
-migrate -path migrations -database "postgresql://postgres:postgres@localhost:5432/pod_game?sslmode=disable" up
+```bash
+make run
 ```
 
-3. Configure environment variables (copy from `.env.example`):
-```bash
-# Application
-APP_NAME=Game Backend
+Database migrations run automatically on startup when the app is started with
+the migrate-enabled flow.
+
+The backend will listen on the port configured by `HTTP_PORT`.
+
+## Core Environment Variables
+
+Use `.env.example` as the canonical reference. Core settings include:
+
+```env
+# App / HTTP
+APP_NAME=Pod Game Backend
 APP_VERSION=1.0.0
-
-# HTTP Server
-HTTP_PORT=3000
-
-# Database
-PG_URL=postgresql://postgres:postgres@localhost:5432/pod_game?sslmode=disable
-PG_POOL_MAX=10
-
-# Logging
+HTTP_PORT=8090
 LOG_LEVEL=info
 
-# TON Blockchain
-TON_CENTER_V2_URL=https://testnet.toncenter.com/api/v2
-TON_GAME_CONTRACT_ADDRESS=0:your_contract_address
+# PostgreSQL
+PG_POOL_MAX=2
+PG_URL=postgres://user:myAwEsOm3pa55%40w0rd@localhost:5433/db?sslmode=disable
 
-# Circuit Breaker
-CIRCUIT_BREAKER_MAX_FAILURES=5
-CIRCUIT_BREAKER_TIMEOUT=60s
+# Messaging / infrastructure
+GRPC_PORT=8081
+RMQ_URL=amqp://guest:guest@localhost:5672/
+NATS_URL=nats://guest:guest@localhost:4223/
 
-# CORS
-CORS_ALLOWED_ORIGINS=http://localhost:3001,https://yourdomain.com
+# TON / gameplay
+TON_CENTER_V2_URL=http://localhost:8082
+TON_CENTER_V3_WS_URL=ws://localhost:8081/api/v3/websocket
+TON_GAME_CONTRACT_ADDRESS=EQD...replace_with_same_address_as_frontend
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# API behavior
+CORS_ALLOWED_ORIGINS=https://localhost:5173,http://localhost:5173,https://t.me
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=1m
+
+# Event source mode
+BLOCKCHAIN_EVENT_SOURCE=http
+ENABLE_WEBSOCKET=false
+WS_RECONNECT_MAX_ATTEMPTS=10
+WS_PING_INTERVAL=30s
+BLOCKCHAIN_RESUME_FROM_CHECKPOINT=true
+BLOCKCHAIN_RESUME_EVENT_SOURCE=true
 ```
 
-4. Run the service:
-```bash
-go run cmd/game-backend/main.go
-```
+If you are running `pod-tma` locally, keep these aligned:
 
-The service will start on `http://localhost:3000`
+- backend `HTTP_PORT`
+- frontend `VITE_API_URL`
+- frontend `VITE_BACKEND_WS_URL`
+- backend `TON_GAME_CONTRACT_ADDRESS`
+- frontend `VITE_POD_FACTORY_ADDRESS`
 
-### API Documentation
+## Public Interfaces
 
-Once the service is running, visit:
-- **Swagger UI**: http://localhost:3000/swagger
-- **Health Check**: http://localhost:3000/health
-- **Prometheus Metrics**: http://localhost:3000/metrics
+### REST API
 
-## Project Structure
-
-```
-pod-backend/
-├── cmd/
-│   └── game-backend/      # Application entry point
-├── internal/
-│   ├── controller/        # HTTP/WebSocket handlers
-│   │   ├── rest/         # REST API controllers
-│   │   ├── websocket/    # WebSocket controllers
-│   │   └── blockchain/   # Blockchain event handler
-│   ├── usecase/          # Business logic
-│   ├── repository/       # Data access layer
-│   │   └── postgres/     # PostgreSQL implementations
-│   ├── entity/           # Domain entities
-│   └── infrastructure/   # External services
-│       ├── toncenter/    # TON blockchain client
-│       ├── metrics/      # Prometheus metrics
-│       └── telegram/     # Telegram auth
-├── migrations/           # Database migrations
-├── tests/
-│   ├── unit/            # Unit tests
-│   └── integration/     # Integration tests
-├── config/              # Configuration
-└── docs/               # Generated Swagger docs
-```
-
-## API Endpoints
-
-### Game Endpoints
-
-- `GET /api/v1/games` - List available games (with status filter)
-- `GET /api/v1/games/:gameId` - Get game details by ID
-
-### User Endpoints
-
-- `GET /api/v1/users/:address` - Get user profile and statistics
-- `GET /api/v1/users/:address/history` - Get user's game history
-- `GET /api/v1/users/:address/referrals` - Get referral statistics
+- `GET /api/v1/games`
+- `GET /api/v1/games/:gameId`
+- `POST /api/v1/games/:gameId/reserve`
+- `GET /api/v1/games/:gameId/reservation`
+- `DELETE /api/v1/games/:gameId/reserve`
+- `GET /api/v1/reservations`
+- `GET /api/v1/users/:address`
+- `GET /api/v1/users/:address/history`
+- `GET /api/v1/users/:address/referrals`
+- `GET /api/v1/health` — overall service health plus parser recovery snapshot
 
 ### WebSocket
 
-- `WS /ws/games` - Subscribe to ALL game updates (global subscription)
-- `WS /ws/games/:gameId` - Subscribe to specific game updates
+- `WS /ws/games` — broadcast-only global game and reservation updates
+- `WS /ws/games/:gameId` — per-game updates plus reconnect reconciliation via `sync_request`
 
-### System Endpoints
+Server message families:
 
-- `GET /health` - Service health check
-- `GET /metrics` - Prometheus metrics
-- `GET /swagger` - Interactive API documentation
+- `game_state_update` — emitted by global and per-game subscriptions with a top-level RFC3339 `timestamp`
+- `reservation_created` — emitted when a reservation is acquired
+- `reservation_released` — emitted when a reservation expires, is cancelled, or is consumed by a join
+- `sync_response` — returned only by `/ws/games/:gameId` after a client `sync_request`
+- `error` — returned for invalid JSON, unsupported client frames, or temporarily unavailable sync state
 
-## Development
+Client-authored frames:
 
-### Running Tests
+- `/ws/games` is broadcast-only and rejects client payloads with an `error`
+- `/ws/games/:gameId` accepts `{"type":"sync_request","last_event_timestamp":"<optional RFC3339 timestamp>"}` and responds with `sync_response`
+
+If you change either WebSocket interface, update the frontend, docs, and any
+consumers explicitly.
+
+### Operational Endpoints
+
+- `GET /health`
+- `GET /healthz`
+- `GET /metrics`
+- `GET /swagger/*`
+- `GET /api/v1/health`
+
+`GET /api/v1/health` is the parser/sync recovery surface used by the frontend
+and operators. In addition to top-level service fields, it returns a nested
+`parser` object with:
+
+- `status` — parser-specific health after merging live connection state and the
+  persisted checkpoint snapshot
+- `recovery_status` — one of `live`, `fallback_active`, `recovering`,
+  `stalled`, or `not_configured`
+- `last_processed_lt` — most recent successfully handled TON logical time
+- `checkpoint_updated_at` — last persisted checkpoint write timestamp
+- `fallback_count` and `last_fallback_at` — restart-safe fallback telemetry
+- `current_source_type` — source currently reflected in parser health
+
+## Architecture and Structure
+
+The backend follows clean architecture with inward-only dependency flow:
+
+`controller -> usecase -> repository -> entity`
+
+```text
+pod-backend/
+├── cmd/
+│   └── app/               # Application entry point
+├── config/                # Environment-backed configuration
+├── docs/                  # Generated Swagger/proto artifacts
+├── internal/
+│   ├── app/               # App wiring and bootstrap
+│   ├── controller/
+│   │   ├── blockchain/    # Blockchain event handling
+│   │   ├── http/          # Router + middleware
+│   │   ├── rest/          # REST handlers
+│   │   └── websocket/     # WebSocket handlers
+│   ├── entity/            # Domain models and domain errors
+│   ├── infrastructure/    # External integrations
+│   ├── repository/        # Persistence and query layer
+│   └── usecase/           # Business logic
+├── migrations/            # SQL migrations
+├── pkg/                   # Shared infra packages
+└── tests/                 # Unit and integration tests
+```
+
+## Validation and Development Commands
 
 ```bash
+# Format
+make format
+
+# Lint
+make linter-golangci
+
 # Unit tests
 go test ./tests/unit/... -v
 
 # Integration tests
 go test ./tests/integration/... -v
 
-# All tests with coverage
+# Full test run
 go test ./... -v -race -cover
+
+# Swagger generation
+make swag-v1
+
+# Mock generation
+make mock
+
+# Dependency audit
+make deps-audit
 ```
 
-### Code Quality
+Integration tests require a working Postgres database, typically via
+`TEST_PG_URL` or the integration Docker setup.
+
+## Migrations
 
 ```bash
-# Format code
-go fmt ./...
+# Create a new migration
+make migrate-create your_migration_name
 
-# Lint
-go vet ./...
+# Apply migrations manually
+make migrate-up
 ```
 
-### Database Migrations
+Migration rules:
 
-```bash
-# Create new migration
-migrate create -ext sql -dir migrations -seq migration_name
+- Keep migrations idempotent (`IF NOT EXISTS` / `IF EXISTS`).
+- Do not rewrite already-deployed migrations unless the task explicitly calls
+  for it.
 
-# Apply migrations
-migrate -path migrations -database "postgresql://..." up
+## Blockchain Event Streaming
 
-# Rollback migration
-migrate -path migrations -database "postgresql://..." down 1
-```
+The backend can ingest blockchain events through either HTTP polling or
+WebSocket streaming.
 
-## Monitoring
+Key controls:
 
-### Prometheus Metrics
+- `BLOCKCHAIN_EVENT_SOURCE=http|websocket`
+- `ENABLE_WEBSOCKET=true|false`
+- `BLOCKCHAIN_RESUME_FROM_CHECKPOINT=true|false`
+- `BLOCKCHAIN_RESUME_EVENT_SOURCE=true|false`
+- `TON_CENTER_V3_WS_URL`
+- `WS_RECONNECT_MAX_ATTEMPTS`
+- `WS_PING_INTERVAL`
 
-The service exposes metrics at `/metrics`:
+Use `GET /api/v1/health` to confirm which event source is active, whether the
+parser is live or recovering, and which LT/checkpoint the backend would resume
+from after a restart. The plain `/health` and `/healthz` endpoints remain
+lightweight process probes, while `/metrics` exposes longer-lived counters.
 
-- `http_requests_total` - HTTP requests by method, path, status
-- `http_request_duration_seconds` - Request duration
-- `websocket_active_connections` - Active WS connections
-- `blockchain_events_received_total` - Events by type
-- `blockchain_events_processed_total` - Successfully processed events
-- `blockchain_last_processed_block` - Block progress
-- `blockchain_circuit_breaker_state` - Circuit breaker state
+### Foundational parser and sync contract
 
-### Health Checks
+The parser/sync pipeline has a few behavior guarantees that completion work
+must preserve:
 
-```json
-{
-  "status": "healthy",
-  "database": "connected",
-  "ton_center": "available",
-  "circuit_breaker": "closed",
-  "last_processed_block": 12345678,
-  "event_source_type": "websocket"
-}
-```
+- Runtime ingestion uses the authoritative `NewRuntimeMessageParser()` path,
+  which is backed by the tonutils-go cell parser in
+  `internal/infrastructure/toncenter/message_parser_v2.go`. The legacy parser in
+  `message_parser.go` remains for compatibility/regression coverage only.
+- The runtime parser accepts both TON Center `message` payloads and
+  `msg_data.body` payloads, and it rejects overflowing `uint256` game IDs
+  instead of silently truncating them into `int64`.
+- LT checkpoints advance only after successful transaction handling. Both the
+  HTTP poller and the WebSocket subscriber keep checkpoint writes monotonic so a
+  failed transaction is retried on the next pass instead of being skipped.
+- Duplicate/older transactions are ignored once their LT is at or behind the
+  current checkpoint, which keeps fallback/restart handoff idempotent across
+  `http` and `websocket` event sources.
+- Parser outcomes are intentionally split into:
+  1. non-game / empty-`in_msg` traffic, which stays debug-only and does not hit
+     DLQ handling,
+  2. malformed or validation-failed game traffic, which is recorded as parser or
+     validation failure and can be stored in the DLQ for operator follow-up.
 
-## WebSocket Event Streaming
+## Operational Notes and Pitfalls
 
-The backend supports two modes for receiving blockchain events from TON Center:
+- Backend behavior must stay aligned with the rewritten TON contracts.
+- Do not introduce an ORM; this codebase uses `pgx` + `squirrel`.
+- Preserve compatibility with both current WebSocket interfaces unless the task
+  explicitly changes the public API.
+- Update Swagger comments when adding or changing endpoints.
+- Do not port FastAPI/SQLAlchemy/Celery patterns from the backend reference
+  repo into this service.
 
-### Configuration
+## Related Documentation
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `BLOCKCHAIN_EVENT_SOURCE` | `http` | Event source type: `websocket` or `http` |
-| `ENABLE_WEBSOCKET` | `false` | Enable WebSocket streaming |
-| `TON_CENTER_V3_WS_URL` | - | WebSocket endpoint URL |
-| `WS_RECONNECT_MAX_ATTEMPTS` | `10` | Reconnection attempts before fallback |
-| `WS_PING_INTERVAL` | `30s` | Connection health check interval |
-
-### Mode Comparison
-
-| Feature | HTTP Polling | WebSocket |
-|---------|--------------|-----------|
-| Latency | 5-30 seconds | <2 seconds |
-| Connection | Stateless | Persistent |
-| Reliability | High | Medium |
-| Resource Usage | Higher | Lower |
-
-### Enable WebSocket (Production)
-
-```bash
-BLOCKCHAIN_EVENT_SOURCE=websocket
-ENABLE_WEBSOCKET=true
-TON_CENTER_V3_WS_URL=wss://api.toncenter.com/api/v3/websocket
-WS_RECONNECT_MAX_ATTEMPTS=10
-WS_PING_INTERVAL=30s
-```
-
-### Troubleshooting WebSocket Issues
-
-**Connection Refused**
-- Verify `TON_CENTER_V3_WS_URL` is correct
-- Check if TON Center v3 API supports WebSocket
-- Ensure firewall allows WebSocket connections
-
-**Frequent Disconnections**
-- Increase `WS_RECONNECT_MAX_ATTEMPTS`
-- Check network stability
-- Monitor `/metrics` for `websocket_reconnection_total`
-
-**Fallback to HTTP**
-- System automatically falls back after max reconnect attempts
-- Check logs for "Falling back to HTTP polling" messages
-- Monitor `/health` endpoint for `event_source_type` field
-
-**High Latency with WebSocket**
-- Check `blockchain_event_latency_seconds` metric
-- Verify TON Center API server proximity
-- Consider using geographically closer endpoint
-
-### Monitoring WebSocket Health
-
-Check Prometheus metrics:
-```promql
-# Active WebSocket connection state
-blockchain_websocket_connected
-
-# Reconnection attempts
-blockchain_websocket_reconnection_total
-
-# Message processing time
-blockchain_event_processing_duration_seconds
-```
-
-## Documentation
-
-For detailed specifications:
-- `/specs/001-game-backend/spec.md` - Feature specifications
-- `/specs/001-game-backend/plan.md` - Implementation plan
-- `/specs/001-game-backend/data-model.md` - Database schema
-- `/specs/001-game-backend/tasks.md` - Task breakdown
+- [Main project README](../README.md)
+- [POD smart contracts](../pod-contract/README.md)
+- [POD TMA frontend](../pod-tma/README.md)
+- [Repository constitution](../.specify/memory/constitution.md)
 
 ## License
 
-Proprietary - All rights reserved
+This software is proprietary and confidential. Unauthorized copying,
+modification, distribution, or use is strictly prohibited.

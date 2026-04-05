@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"pod-backend/pkg/logger"
-
 	"github.com/stretchr/testify/assert"
+	"pod-backend/pkg/logger"
 )
 
 // MockLogger implements logger.Interface and captures logs
@@ -26,18 +25,23 @@ var _ logger.Interface = (*MockLogger)(nil)
 func (m *MockLogger) Debug(message interface{}, args ...interface{}) {
 	m.log("DEBUG", message, args...)
 }
+
 func (m *MockLogger) Info(message string, args ...interface{}) {
 	m.log("INFO", message, args...)
 }
+
 func (m *MockLogger) Warn(message string, args ...interface{}) {
 	m.log("WARN", message, args...)
 }
+
 func (m *MockLogger) Error(message interface{}, args ...interface{}) {
 	m.log("ERROR", message, args...)
 }
+
 func (m *MockLogger) Fatal(message interface{}, args ...interface{}) {
 	m.log("FATAL", message, args...)
 }
+
 func (m *MockLogger) log(level string, message interface{}, args ...interface{}) {
 	msg := fmt.Sprintf("%v", message)
 	if len(args) > 0 {
@@ -211,4 +215,12 @@ func TestPoller_Poll_NoGap(t *testing.T) {
 		}
 	}
 	assert.False(t, foundBackfill, "Did not expect backfilling log")
+}
+
+func TestNewPollerWithIntervals_DefaultsNonPositiveIntervals(t *testing.T) {
+	poller := NewPollerWithIntervals(nil, &MockEventHandler{}, &MockLogger{}, 0, 0, 0)
+
+	assert.Equal(t, MinPollInterval, poller.minInterval)
+	assert.Equal(t, MaxPollInterval, poller.maxInterval)
+	assert.Equal(t, MaxPollInterval, poller.currentInterval)
 }

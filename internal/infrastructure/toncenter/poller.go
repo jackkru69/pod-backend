@@ -20,6 +20,8 @@ const (
 	// Exponential backoff for TON Center reconnection (T103, FR-019)
 	BackoffInitial = 1 * time.Second
 	BackoffMax     = 16 * time.Second
+
+	defaultLastProcessedLt = "0"
 )
 
 // EventHandler processes blockchain transactions.
@@ -50,23 +52,41 @@ type Poller struct {
 	onLtUpdated       func(lt string) // Callback when last processed lt is updated
 }
 
+func normalizePollIntervals(minInterval, maxInterval time.Duration) (time.Duration, time.Duration) {
+	if minInterval <= 0 {
+		minInterval = MinPollInterval
+	}
+	if maxInterval <= 0 {
+		maxInterval = MaxPollInterval
+	}
+	if maxInterval < minInterval {
+		maxInterval = minInterval
+	}
+
+	return minInterval, maxInterval
+}
+
 // NewPoller creates a new adaptive blockchain poller.
 // startBlock parameter is kept for API compatibility but ignored since TON uses logical time (lt).
 func NewPoller(client *Client, handler EventHandler, logger logger.Interface, startBlock int64) *Poller {
+	minInterval, maxInterval := normalizePollIntervals(MinPollInterval, MaxPollInterval)
+
 	return &Poller{
 		client:          client,
 		handler:         handler,
 		logger:          logger,
-		currentInterval: MaxPollInterval, // Start slow
-		minInterval:     MinPollInterval, // Use default constants
-		maxInterval:     MaxPollInterval,
-		lastProcessedLt: "0", // Start from beginning
+		currentInterval: maxInterval, // Start slow
+		minInterval:     minInterval, // Use default constants
+		maxInterval:     maxInterval,
+		lastProcessedLt: defaultLastProcessedLt, // Start from beginning
 		stopCh:          make(chan struct{}),
 	}
 }
 
 // NewPollerWithIntervals creates a new poller with custom intervals.
 func NewPollerWithIntervals(client *Client, handler EventHandler, logger logger.Interface, startBlock int64, minInterval, maxInterval time.Duration) *Poller {
+	minInterval, maxInterval = normalizePollIntervals(minInterval, maxInterval)
+
 	return &Poller{
 		client:          client,
 		handler:         handler,
@@ -74,9 +94,27 @@ func NewPollerWithIntervals(client *Client, handler EventHandler, logger logger.
 		currentInterval: maxInterval, // Start slow
 		minInterval:     minInterval,
 		maxInterval:     maxInterval,
-		lastProcessedLt: "0", // Start from beginning
+		lastProcessedLt: defaultLastProcessedLt, // Start from beginning
 		stopCh:          make(chan struct{}),
 	}
+}
+
+func normalizeLt(lt string) string {
+	if lt == "" {
+		return defaultLastProcessedLt
+	}
+
+	return lt
+}
+
+func compareLtValues(lt1, lt2 string) int {
+	n1 := new(big.Int)
+	n2 := new(big.Int)
+
+	n1.SetString(normalizeLt(lt1), 10)
+	n2.SetString(normalizeLt(lt2), 10)
+
+	return n1.Cmp(n2)
 }
 
 // SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
@@ -88,6 +126,11 @@ func (p *Poller) SetOnLtUpdated(callback func(lt string)) {
 // Start begins the adaptive polling loop.
 // Runs in a separate goroutine until Stop() is called.
 func (p *Poller) Start(ctx context.Context) {
+	p.minInterval, p.maxInterval = normalizePollIntervals(p.minInterval, p.maxInterval)
+	if p.currentInterval <= 0 {
+		p.currentInterval = p.maxInterval
+	}
+
 	p.ticker = time.NewTicker(p.currentInterval)
 	p.isRunning.Store(true)
 
@@ -122,14 +165,50 @@ func (p *Poller) Stop() {
 // compareLt compares two logical time strings as big integers.
 // Returns true if lt1 > lt2 (lt1 is newer than lt2).
 func compareLt(lt1, lt2 string) bool {
-	// Parse as big integers to handle large lt values
-	n1 := new(big.Int)
-	n2 := new(big.Int)
+	return compareLtValues(lt1, lt2) > 0
+}
 
-	n1.SetString(lt1, 10)
-	n2.SetString(lt2, 10)
+func transactionDedupKey(tx Transaction) string {
+	return normalizeLt(tx.Lt()) + "\x00" + tx.Hash()
+}
 
-	return n1.Cmp(n2) > 0
+func sortTransactionsByLt(txs []Transaction, ascending bool) {
+	sort.Slice(txs, func(i, j int) bool {
+		cmp := compareLtValues(txs[i].Lt(), txs[j].Lt())
+		if cmp == 0 {
+			return txs[i].Hash() < txs[j].Hash()
+		}
+		if ascending {
+			return cmp < 0
+		}
+		return cmp > 0
+	})
+}
+
+func normalizeTransactionsByLt(txs []Transaction, ascending bool) ([]Transaction, int) {
+	if len(txs) == 0 {
+		return nil, 0
+	}
+
+	uniqueTxs := make(map[string]Transaction, len(txs))
+	duplicateCount := 0
+	for _, tx := range txs {
+		key := transactionDedupKey(tx)
+		if _, exists := uniqueTxs[key]; exists {
+			duplicateCount++
+			continue
+		}
+		uniqueTxs[key] = tx
+	}
+
+	normalized := make([]Transaction, 0, len(uniqueTxs))
+	for _, tx := range uniqueTxs {
+		normalized = append(normalized, tx)
+	}
+
+	sortTransactionsByLt(normalized, ascending)
+
+	return normalized, duplicateCount
 }
 
 // poll performs a single poll cycle.
@@ -155,6 +234,13 @@ func (p *Poller) poll(ctx context.Context) {
 		if compareLt(tx.Lt(), p.lastProcessedLt) {
 			newTxs = append(newTxs, tx)
 		}
+	}
+
+	var duplicateCount int
+	newTxs, duplicateCount = normalizeTransactionsByLt(newTxs, true)
+	if duplicateCount > 0 {
+		p.logger.Warn("Deduplicated %d HTTP polling transactions newer than checkpoint %s",
+			duplicateCount, p.lastProcessedLt)
 	}
 
 	if len(newTxs) == 0 {
@@ -225,24 +311,12 @@ func (p *Poller) poll(ctx context.Context) {
 				break
 			}
 
-			// Deduplicate transactions
-			uniqueTxs := make(map[string]Transaction)
-			for _, tx := range newTxs {
-				uniqueTxs[tx.Lt()] = tx
+			var backfillDuplicateCount int
+			newTxs, backfillDuplicateCount = normalizeTransactionsByLt(newTxs, true)
+			if backfillDuplicateCount > 0 {
+				p.logger.Warn("Deduplicated %d transactions while merging backfill batches",
+					backfillDuplicateCount)
 			}
-			newTxs = make([]Transaction, 0, len(uniqueTxs))
-			for _, tx := range uniqueTxs {
-				newTxs = append(newTxs, tx)
-			}
-
-			// Re-sort to find the new oldest transaction
-			sort.Slice(newTxs, func(i, j int) bool {
-				n1 := new(big.Int)
-				n2 := new(big.Int)
-				n1.SetString(newTxs[i].Lt(), 10)
-				n2.SetString(newTxs[j].Lt(), 10)
-				return n1.Cmp(n2) < 0 // ASC order (oldest first)
-			})
 
 			// Update oldestTx for next iteration
 			oldestTx = newTxs[0]
@@ -329,7 +403,7 @@ func (p *Poller) adjustInterval(hasActivity bool) {
 	}
 
 	// Update ticker if interval changed
-	if p.currentInterval != oldInterval {
+	if p.currentInterval != oldInterval && p.ticker != nil {
 		p.ticker.Reset(p.currentInterval)
 		p.logger.Debug("Adjusted poll interval: %v -> %v", oldInterval, p.currentInterval)
 	}
@@ -359,8 +433,8 @@ func (p *Poller) GetLastProcessedLt() string {
 // SetLastProcessedLt updates the starting logical time for polling.
 // Useful for resuming from database state.
 func (p *Poller) SetLastProcessedLt(lt string) {
-	p.lastProcessedLt = lt
-	p.logger.Info("Set last processed lt to %s", lt)
+	p.lastProcessedLt = normalizeLt(lt)
+	p.logger.Info("Set last processed lt to %s", p.lastProcessedLt)
 }
 
 // Subscribe registers an event handler (T149).

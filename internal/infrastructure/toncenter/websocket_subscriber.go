@@ -13,13 +13,16 @@ var _ EventSource = (*WebSocketSubscriber)(nil)
 // WebSocketSubscriber wraps WebSocketClient to implement EventSource interface (T150).
 // Provides real-time event streaming from TON Center API v3.
 type WebSocketSubscriber struct {
-	client          *WebSocketClient
-	handler         EventHandler
-	logger          logger.Interface
-	lastProcessedLt string
-	ltMu            sync.RWMutex
-	ctx             context.Context
-	cancel          context.CancelFunc
+	client            *WebSocketClient
+	handler           EventHandler
+	logger            logger.Interface
+	lastProcessedLt   string
+	lastProcessedHash string
+	onLtUpdated       func(lt string)
+	ltMu              sync.RWMutex
+	ctxMu             sync.RWMutex
+	ctx               context.Context
+	cancel            context.CancelFunc
 }
 
 // WebSocketSubscriberConfig holds configuration for WebSocketSubscriber.
@@ -36,7 +39,7 @@ func NewWebSocketSubscriber(cfg WebSocketSubscriberConfig, log logger.Interface)
 	// Create event handler adapter
 	sub := &WebSocketSubscriber{
 		logger:          log,
-		lastProcessedLt: "0",
+		lastProcessedLt: defaultLastProcessedLt,
 	}
 
 	// Parse ping interval (default 30s)
@@ -62,29 +65,69 @@ func NewWebSocketSubscriber(cfg WebSocketSubscriberConfig, log logger.Interface)
 
 // HandleTransaction implements EventHandler interface to process transactions.
 // Updates last processed lt and forwards to registered handler.
-// BUG FIX: Use compareLt() for proper big.Int comparison instead of string comparison.
-// String comparison is incorrect: "9" > "10" returns true (ASCII comparison).
+// Resume safety requires monotonic lt advancement only after successful handling.
 func (s *WebSocketSubscriber) HandleTransaction(ctx context.Context, tx Transaction) error {
-	// Update last processed lt using proper numeric comparison
-	s.ltMu.Lock()
-	if compareLt(tx.Lt(), s.lastProcessedLt) {
-		s.lastProcessedLt = tx.Lt()
+	txLt := normalizeLt(tx.Lt())
+	txHash := tx.Hash()
+
+	s.ltMu.RLock()
+	lastProcessedLt := normalizeLt(s.lastProcessedLt)
+	lastProcessedHash := s.lastProcessedHash
+	s.ltMu.RUnlock()
+
+	if txLt == lastProcessedLt {
+		if s.logger != nil {
+			if txHash != "" && txHash == lastProcessedHash {
+				s.logger.Debug("Skipping duplicate WebSocket transaction hash=%s lt=%s (checkpoint=%s)",
+					txHash, txLt, lastProcessedLt)
+			} else {
+				s.logger.Warn("Skipping same-lt WebSocket transaction hash=%s lt=%s (checkpoint=%s hash=%s)",
+					txHash, txLt, lastProcessedLt, lastProcessedHash)
+			}
+		}
+		return nil
 	}
-	s.ltMu.Unlock()
+	if !compareLt(txLt, lastProcessedLt) {
+		if s.logger != nil {
+			s.logger.Warn("Skipping out-of-order WebSocket transaction hash=%s lt=%s (checkpoint=%s)",
+				txHash, txLt, lastProcessedLt)
+		}
+		return nil
+	}
 
 	// Forward to registered handler
 	if s.handler != nil {
-		return s.handler.HandleTransaction(ctx, tx)
+		if err := s.handler.HandleTransaction(ctx, tx); err != nil {
+			return err
+		}
 	}
+
+	var callback func(lt string)
+
+	s.ltMu.Lock()
+	if compareLt(txLt, normalizeLt(s.lastProcessedLt)) {
+		s.lastProcessedLt = txLt
+		s.lastProcessedHash = txHash
+		callback = s.onLtUpdated
+	}
+	s.ltMu.Unlock()
+
+	if callback != nil {
+		callback(txLt)
+	}
+
 	return nil
 }
 
 // Start begins WebSocket event streaming (T150).
 func (s *WebSocketSubscriber) Start(ctx context.Context) {
+	s.ctxMu.Lock()
 	s.ctx, s.cancel = context.WithCancel(ctx)
+	runtimeCtx := s.ctx
+	s.ctxMu.Unlock()
 
 	// Connect to WebSocket
-	if err := s.client.Connect(s.ctx); err != nil {
+	if err := s.client.Connect(runtimeCtx); err != nil {
 		s.logger.Error("Failed to connect WebSocket: %v", err)
 		// Trigger fallback on initial connection failure
 		s.client.TriggerFallback()
@@ -92,7 +135,7 @@ func (s *WebSocketSubscriber) Start(ctx context.Context) {
 	}
 
 	// Subscribe to contract events
-	if err := s.client.Subscribe(s.ctx); err != nil {
+	if err := s.client.Subscribe(runtimeCtx); err != nil {
 		s.logger.Error("Failed to subscribe to events: %v", err)
 		// Trigger fallback on subscription failure
 		s.client.TriggerFallback()
@@ -100,15 +143,19 @@ func (s *WebSocketSubscriber) Start(ctx context.Context) {
 	}
 
 	// Start event processing
-	s.client.Start(s.ctx)
+	s.client.Start(runtimeCtx)
 
 	s.logger.Info("WebSocket subscriber started for contract events")
 }
 
 // Stop gracefully stops the WebSocket subscriber (T150).
 func (s *WebSocketSubscriber) Stop() {
-	if s.cancel != nil {
-		s.cancel()
+	s.ctxMu.RLock()
+	cancel := s.cancel
+	s.ctxMu.RUnlock()
+
+	if cancel != nil {
+		cancel()
 	}
 	if s.client != nil {
 		s.client.Stop()
@@ -132,8 +179,16 @@ func (s *WebSocketSubscriber) GetLastProcessedLt() string {
 func (s *WebSocketSubscriber) SetLastProcessedLt(lt string) {
 	s.ltMu.Lock()
 	defer s.ltMu.Unlock()
-	s.lastProcessedLt = lt
-	s.logger.Info("WebSocket subscriber: set last processed lt to %s", lt)
+	s.lastProcessedLt = normalizeLt(lt)
+	s.lastProcessedHash = ""
+	s.logger.Info("WebSocket subscriber: set last processed lt to %s", s.lastProcessedLt)
+}
+
+// SetOnLtUpdated sets a callback that is called when last_processed_lt is updated.
+func (s *WebSocketSubscriber) SetOnLtUpdated(callback func(lt string)) {
+	s.ltMu.Lock()
+	defer s.ltMu.Unlock()
+	s.onLtUpdated = callback
 }
 
 // IsConnected returns whether the WebSocket is connected (T150).
@@ -147,4 +202,11 @@ func (s *WebSocketSubscriber) IsConnected() bool {
 // GetSourceType returns "websocket" (T150).
 func (s *WebSocketSubscriber) GetSourceType() string {
 	return SourceTypeWebSocket
+}
+
+func (s *WebSocketSubscriber) Context() context.Context {
+	s.ctxMu.RLock()
+	defer s.ctxMu.RUnlock()
+
+	return s.ctx
 }

@@ -316,7 +316,7 @@ const docTemplate = `{
         },
         "/api/v1/health": {
             "get": {
-                "description": "Returns service health status including database connectivity and event source type",
+                "description": "Returns service health status including database connectivity, TON Center reachability, active event source, and parser checkpoint/recovery details",
                 "produces": [
                     "application/json"
                 ],
@@ -769,6 +769,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "database": {
+                    "description": "PostgreSQL connectivity state.",
                     "type": "string",
                     "enum": [
                         "connected",
@@ -777,6 +778,7 @@ const docTemplate = `{
                     ]
                 },
                 "event_source_status": {
+                    "description": "Connectivity state for the active event source.",
                     "type": "string",
                     "enum": [
                         "connected",
@@ -785,6 +787,7 @@ const docTemplate = `{
                     ]
                 },
                 "event_source_type": {
+                    "description": "Active blockchain ingestion source.",
                     "type": "string",
                     "enum": [
                         "websocket",
@@ -792,7 +795,16 @@ const docTemplate = `{
                         "not_configured"
                     ]
                 },
+                "parser": {
+                    "description": "Parser checkpoint and recovery snapshot.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/rest.ParserHealthResponse"
+                        }
+                    ]
+                },
                 "status": {
+                    "description": "Overall service status after merging database, TON Center, and parser state.",
                     "type": "string",
                     "enum": [
                         "healthy",
@@ -801,9 +813,11 @@ const docTemplate = `{
                     ]
                 },
                 "timestamp": {
+                    "description": "Response timestamp in RFC3339 format.",
                     "type": "string"
                 },
                 "ton_center_api": {
+                    "description": "TON Center client/circuit-breaker state.",
                     "type": "string",
                     "enum": [
                         "connected",
@@ -822,6 +836,56 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/rest.ReservationResponse"
                     }
+                }
+            }
+        },
+        "rest.ParserHealthResponse": {
+            "type": "object",
+            "properties": {
+                "checkpoint_updated_at": {
+                    "description": "Last persisted checkpoint update time in RFC3339 format.",
+                    "type": "string"
+                },
+                "current_source_type": {
+                    "description": "Event source currently reflected by parser health.",
+                    "type": "string",
+                    "enum": [
+                        "websocket",
+                        "http",
+                        "not_configured"
+                    ]
+                },
+                "fallback_count": {
+                    "description": "Number of source fallback activations recorded in sync state.",
+                    "type": "integer"
+                },
+                "last_fallback_at": {
+                    "description": "Most recent fallback activation time in RFC3339 format.",
+                    "type": "string"
+                },
+                "last_processed_lt": {
+                    "description": "Most recent successfully processed TON logical time.",
+                    "type": "string"
+                },
+                "recovery_status": {
+                    "description": "Recovery mode derived from live and persisted sync state.",
+                    "type": "string",
+                    "enum": [
+                        "live",
+                        "fallback_active",
+                        "recovering",
+                        "stalled",
+                        "not_configured"
+                    ]
+                },
+                "status": {
+                    "description": "Parser-specific health state.",
+                    "type": "string",
+                    "enum": [
+                        "healthy",
+                        "degraded",
+                        "unhealthy"
+                    ]
                 }
             }
         },

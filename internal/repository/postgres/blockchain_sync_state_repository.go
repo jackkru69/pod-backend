@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"pod-backend/internal/entity"
@@ -35,6 +36,7 @@ func (r *BlockchainSyncStateRepository) Get(ctx context.Context) (*entity.Blockc
 			"updated_at",
 			"COALESCE(event_source_type::text, 'http')",
 			"COALESCE(last_processed_lt, '0')",
+			"COALESCE(last_processed_hash, '')",
 			"COALESCE(websocket_connected, false)",
 			"COALESCE(fallback_count, 0)",
 			"last_fallback_at",
@@ -55,6 +57,7 @@ func (r *BlockchainSyncStateRepository) Get(ctx context.Context) (*entity.Blockc
 		&state.UpdatedAt,
 		&state.EventSourceType,
 		&state.LastProcessedLt,
+		&state.LastProcessedHash,
 		&state.WebSocketConnected,
 		&state.FallbackCount,
 		&state.LastFallbackAt,
@@ -175,18 +178,66 @@ func (r *BlockchainSyncStateRepository) SetEventSourceType(ctx context.Context, 
 
 // UpdateLastProcessedLt atomically updates the last processed logical time (T147).
 func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Context, lt string) error {
-	now := time.Now()
-	sql, args, err := r.pg.Builder.
-		Update("blockchain_sync_state").
-		Set("last_processed_lt", lt).
-		Set("last_poll_timestamp", now).
-		Where("id = ?", 1).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build query: %w", err)
+	if strings.TrimSpace(lt) == "" {
+		lt = "0"
 	}
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	now := time.Now()
+	const query = `
+		UPDATE blockchain_sync_state
+		SET
+			last_processed_lt = CASE
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1
+				ELSE COALESCE(NULLIF(last_processed_lt, ''), '0')
+			END,
+			last_poll_timestamp = CASE
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $2
+				ELSE last_poll_timestamp
+			END
+		WHERE id = 1
+	`
+
+	_, err := r.pg.Pool.Exec(ctx, query, lt, now)
+	if err != nil {
+		return fmt.Errorf("execute query: %w", err)
+	}
+
+	return nil
+}
+
+// PersistCheckpoint stores the resumable TON checkpoint together with source status.
+func (r *BlockchainSyncStateRepository) PersistCheckpoint(
+	ctx context.Context,
+	lt string,
+	sourceType repository.EventSourceType,
+	connected bool,
+) error {
+	if strings.TrimSpace(lt) == "" {
+		lt = "0"
+	}
+
+	if strings.TrimSpace(string(sourceType)) == "" {
+		sourceType = repository.EventSourceHTTP
+	}
+
+	now := time.Now()
+	const query = `
+		UPDATE blockchain_sync_state
+		SET
+			last_processed_lt = CASE
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1
+				ELSE COALESCE(NULLIF(last_processed_lt, ''), '0')
+			END,
+			last_poll_timestamp = CASE
+				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $2
+				ELSE last_poll_timestamp
+			END,
+			event_source_type = $3,
+			websocket_connected = $4
+		WHERE id = 1
+	`
+
+	_, err := r.pg.Pool.Exec(ctx, query, lt, now, string(sourceType), connected)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}
@@ -217,19 +268,17 @@ func (r *BlockchainSyncStateRepository) GetLastProcessedLt(ctx context.Context) 
 // RecordFallback increments the fallback counter and sets the timestamp (T147).
 func (r *BlockchainSyncStateRepository) RecordFallback(ctx context.Context) error {
 	now := time.Now()
-	sql, args, err := r.pg.Builder.
-		Update("blockchain_sync_state").
-		Set("fallback_count", "fallback_count + 1").
-		Set("last_fallback_at", now).
-		Set("event_source_type", string(repository.EventSourceHTTP)).
-		Set("websocket_connected", false).
-		Where("id = ?", 1).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build query: %w", err)
-	}
+	const query = `
+		UPDATE blockchain_sync_state
+		SET
+			fallback_count = COALESCE(fallback_count, 0) + 1,
+			last_fallback_at = $1,
+			event_source_type = $2,
+			websocket_connected = false
+		WHERE id = 1
+	`
 
-	_, err = r.pg.Pool.Exec(ctx, sql, args...)
+	_, err := r.pg.Pool.Exec(ctx, query, now, string(repository.EventSourceHTTP))
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}

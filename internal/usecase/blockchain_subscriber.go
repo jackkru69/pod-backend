@@ -2,7 +2,10 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"pod-backend/internal/entity"
@@ -17,6 +20,13 @@ const (
 	defaultInitialBackoff    = 100 * time.Millisecond
 	defaultMaxBackoff        = 2 * time.Second
 	defaultBackoffMultiplier = 2.0
+	parserMetricsLabel       = "parser"
+	dlqMetricsLabel          = "dlq"
+)
+
+var (
+	errTransactionHasNoInMsg = errors.New("transaction has no in_msg data")
+	errUnknownEventType      = errors.New("unknown event type")
 )
 
 // RetryConfig holds retry/backoff configuration parameters.
@@ -26,6 +36,40 @@ type RetryConfig struct {
 	InitialBackoff    time.Duration
 	MaxBackoff        time.Duration
 	BackoffMultiplier float64
+}
+
+// BlockchainSubscriberObservability captures parser failures, retry posture, and DLQ outcomes.
+type BlockchainSubscriberObservability struct {
+	ParseFailuresTotal             uint64              `json:"parse_failures_total"`
+	ValidationFailuresTotal        uint64              `json:"validation_failures_total"`
+	PersistenceRetryAttemptsTotal  uint64              `json:"persistence_retry_attempts_total"`
+	PersistenceRetryRecoveredTotal uint64              `json:"persistence_retry_recovered_total"`
+	PersistenceFailuresExhausted   uint64              `json:"persistence_failures_exhausted_total"`
+	DLQStoreAttemptsTotal          uint64              `json:"dlq_store_attempts_total"`
+	DLQStoredTotal                 uint64              `json:"dlq_stored_total"`
+	DLQDuplicateTotal              uint64              `json:"dlq_duplicate_total"`
+	DLQStoreFailuresTotal          uint64              `json:"dlq_store_failures_total"`
+	LastFailureType                entity.DLQErrorType `json:"last_failure_type,omitempty"`
+	LastFailureError               string              `json:"last_failure_error,omitempty"`
+	LastFailureTxHash              string              `json:"last_failure_tx_hash,omitempty"`
+	LastFailureTxLt                string              `json:"last_failure_tx_lt,omitempty"`
+	LastFailureAt                  *time.Time          `json:"last_failure_at,omitempty"`
+	LastRetryOutcome               string              `json:"last_retry_outcome,omitempty"`
+	LastRetriedEventType           string              `json:"last_retried_event_type,omitempty"`
+	LastRetriedGameID              int64               `json:"last_retried_game_id,omitempty"`
+	LastRetryAttemptAt             *time.Time          `json:"last_retry_attempt_at,omitempty"`
+	LastExhaustedRetryAt           *time.Time          `json:"last_exhausted_retry_at,omitempty"`
+	LastDLQErrorType               entity.DLQErrorType `json:"last_dlq_error_type,omitempty"`
+	LastDLQStoreOutcome            DLQStoreOutcome     `json:"last_dlq_store_outcome,omitempty"`
+	LastDLQStatus                  entity.DLQStatus    `json:"last_dlq_status,omitempty"`
+	LastDLQResolutionNotes         string              `json:"last_dlq_resolution_notes,omitempty"`
+	LastDLQStoredTxHash            string              `json:"last_dlq_stored_tx_hash,omitempty"`
+	LastDLQStoredTxLt              string              `json:"last_dlq_stored_tx_lt,omitempty"`
+	LastDLQStoredAt                *time.Time          `json:"last_dlq_stored_at,omitempty"`
+	LastDLQStoreFailure            string              `json:"last_dlq_store_failure,omitempty"`
+	LastDLQStoreFailureTxHash      string              `json:"last_dlq_store_failure_tx_hash,omitempty"`
+	LastDLQStoreFailureTxLt        string              `json:"last_dlq_store_failure_tx_lt,omitempty"`
+	LastDLQStoreFailureAt          *time.Time          `json:"last_dlq_store_failure_at,omitempty"`
 }
 
 // DefaultRetryConfig returns the default retry configuration.
@@ -47,11 +91,14 @@ func DefaultRetryConfig() RetryConfig {
 // Issue #6: Integrated with DeadLetterQueueUseCase for failed transaction storage.
 type BlockchainSubscriberUseCase struct {
 	eventSource        toncenter.EventSource
+	parser             toncenter.InMsgParser
 	persistenceUseCase *GamePersistenceUseCase
 	dlqUseCase         *DeadLetterQueueUseCase // Optional DLQ for failed transactions (Issue #6)
 	logger             logger.Interface
 	metrics            *metrics.BlockchainMetrics // Optional metrics (T097)
 	retryConfig        RetryConfig                // Retry configuration (Issue #9)
+	observabilityMu    sync.RWMutex
+	observability      BlockchainSubscriberObservability
 }
 
 // NewBlockchainSubscriberUseCase creates a new blockchain subscriber use case.
@@ -59,12 +106,13 @@ type BlockchainSubscriberUseCase struct {
 func NewBlockchainSubscriberUseCase(
 	eventSource toncenter.EventSource,
 	persistenceUseCase *GamePersistenceUseCase,
-	logger logger.Interface,
+	log logger.Interface,
 ) *BlockchainSubscriberUseCase {
 	uc := &BlockchainSubscriberUseCase{
 		eventSource:        eventSource,
+		parser:             toncenter.NewRuntimeMessageParser(),
 		persistenceUseCase: persistenceUseCase,
-		logger:             logger,
+		logger:             log,
 		metrics:            nil,                  // Set via SetMetrics
 		retryConfig:        DefaultRetryConfig(), // Use defaults, can override via SetRetryConfig
 	}
@@ -81,18 +129,19 @@ func NewBlockchainSubscriberUseCase(
 func NewBlockchainSubscriberUseCaseWithPoller(
 	client *toncenter.Client,
 	persistenceUseCase *GamePersistenceUseCase,
-	logger logger.Interface,
+	log logger.Interface,
 	startBlock int64,
 ) *BlockchainSubscriberUseCase {
 	uc := &BlockchainSubscriberUseCase{
+		parser:             toncenter.NewRuntimeMessageParser(),
 		persistenceUseCase: persistenceUseCase,
-		logger:             logger,
+		logger:             log,
 		metrics:            nil,                  // Set via SetMetrics
 		retryConfig:        DefaultRetryConfig(), // Use defaults
 	}
 
 	// Create poller with this use case as the event handler
-	poller := toncenter.NewPoller(client, uc, logger, startBlock)
+	poller := toncenter.NewPoller(client, uc, log, startBlock)
 	uc.eventSource = poller
 
 	return uc
@@ -144,6 +193,17 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 	// Parse transaction data into GameEvent
 	event, err := uc.parseTransaction(tx)
 	if err != nil {
+		if errorType, observable := classifyParseError(err); observable {
+			uc.recordParseFailure(&tx, err, errorType)
+			if uc.metrics != nil {
+				uc.metrics.RecordEventFailed(parserMetricsLabel, string(errorType))
+			}
+			uc.logger.Warn("Failed to parse blockchain transaction hash=%s lt=%s: %v",
+				tx.Hash(), tx.Lt(), err)
+			uc.storeFailedTransaction(ctx, &tx, err, errorType)
+			return nil
+		}
+
 		// Most transactions won't be game events, so this is normal - use Debug level
 		uc.logger.Debug("Skipping non-game transaction hash=%s lt=%s: %v",
 			tx.Hash(), tx.Lt(), err)
@@ -167,12 +227,7 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 			uc.metrics.RecordEventFailed(event.EventType, "persistence_error")
 		}
 
-		// Store in DLQ for later retry (Issue #6)
-		if uc.dlqUseCase != nil {
-			if dlqErr := uc.dlqUseCase.StoreFailedTransaction(ctx, tx, err, entity.DLQErrorTypePersistence); dlqErr != nil {
-				uc.logger.Error("Failed to store transaction in DLQ: tx=%s, error=%v", tx.Hash(), dlqErr)
-			}
-		}
+		uc.storeFailedTransaction(ctx, &tx, err, entity.DLQErrorTypePersistence)
 
 		return fmt.Errorf("failed to route event: %w", err)
 	}
@@ -191,17 +246,21 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 }
 
 // parseTransaction converts a blockchain transaction into a GameEvent entity.
-// Uses MessageParserV2 to decode BOC-encoded TON messages using tonutils-go Cell parser.
+// Uses the runtime TON message parser so all production decoding goes through a
+// single authoritative parser path.
 // T096: Logs WARN for validation failures.
 func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction) (*entity.GameEvent, error) {
 	// Check if in_msg exists and is not null
 	if len(tx.InMsg) == 0 || string(tx.InMsg) == "null" {
 		// This is a normal blockchain transaction without game event data
-		return nil, fmt.Errorf("transaction has no in_msg data (not a game event)")
+		return nil, errTransactionHasNoInMsg
 	}
 
-	// Use MessageParserV2 to decode the TON message using Cell parser
-	parser := toncenter.NewMessageParserV2()
+	parser := uc.parser
+	if parser == nil {
+		parser = toncenter.NewRuntimeMessageParser()
+	}
+
 	parsedMsg, err := parser.ParseInMsg(tx.InMsg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse TON message: %w", err)
@@ -277,21 +336,12 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 
 	for attempt := 0; attempt <= uc.retryConfig.MaxRetries; attempt++ {
 		if attempt > 0 {
-			uc.logger.Warn("Retrying %s event for game_id=%d (attempt %d/%d, backoff=%v)",
-				event.EventType, event.GameID, attempt, uc.retryConfig.MaxRetries, backoff)
-
-			// Wait with backoff before retry
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
+			nextBackoff, err := uc.waitForRetry(ctx, event, lastErr, attempt, backoff)
+			if err != nil {
+				return err
 			}
 
-			// Increase backoff for next retry (exponential with cap)
-			backoff = time.Duration(float64(backoff) * uc.retryConfig.BackoffMultiplier)
-			if backoff > uc.retryConfig.MaxBackoff {
-				backoff = uc.retryConfig.MaxBackoff
-			}
+			backoff = nextBackoff
 		}
 
 		err := uc.routeEvent(ctx, event)
@@ -299,6 +349,7 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 			if attempt > 0 {
 				uc.logger.Info("Successfully processed %s event for game_id=%d after %d retries",
 					event.EventType, event.GameID, attempt)
+				uc.recordRetryRecovered(event)
 			}
 			return nil
 		}
@@ -314,6 +365,11 @@ func (uc *BlockchainSubscriberUseCase) routeEventWithRetry(ctx context.Context, 
 			uc.logger.Warn("Attempt %d failed for %s event game_id=%d: %v",
 				attempt+1, event.EventType, event.GameID, err)
 		}
+	}
+
+	uc.recordRetryExhausted(event, lastErr)
+	if uc.metrics != nil {
+		uc.metrics.RecordEventFailed(event.EventType, "retry_exhausted")
 	}
 
 	return fmt.Errorf("all %d retry attempts failed: %w", uc.retryConfig.MaxRetries, lastErr)
@@ -352,7 +408,7 @@ func (uc *BlockchainSubscriberUseCase) routeEvent(ctx context.Context, event *en
 	default:
 		uc.logger.Error("Unknown event type: %s for game_id=%d tx=%s",
 			event.EventType, event.GameID, event.TransactionHash)
-		return fmt.Errorf("unknown event type: %s", event.EventType)
+		return fmt.Errorf("%w: %s", errUnknownEventType, event.EventType)
 	}
 
 	return err
@@ -418,7 +474,249 @@ func (uc *BlockchainSubscriberUseCase) GetLastProcessedBlock() int64 {
 // SetLastProcessedBlock updates the starting block for polling.
 // Deprecated: Use SetLastProcessedLt() instead. TON uses logical time (lt) for ordering.
 // This method is kept for backward compatibility.
-func (uc *BlockchainSubscriberUseCase) SetLastProcessedBlock(block int64) {
+func (uc *BlockchainSubscriberUseCase) SetLastProcessedBlock(_ int64) {
 	uc.logger.Warn("SetLastProcessedBlock is deprecated, use SetLastProcessedLt instead")
 	// No-op for backward compatibility
+}
+
+// GetObservabilitySnapshot returns parser, retry, and DLQ handling state for monitoring.
+func (uc *BlockchainSubscriberUseCase) GetObservabilitySnapshot() BlockchainSubscriberObservability {
+	uc.observabilityMu.RLock()
+	defer uc.observabilityMu.RUnlock()
+
+	snapshot := uc.observability
+	if snapshot.LastFailureAt != nil {
+		lastFailureAt := *snapshot.LastFailureAt
+		snapshot.LastFailureAt = &lastFailureAt
+	}
+	if snapshot.LastRetryAttemptAt != nil {
+		lastRetryAttemptAt := *snapshot.LastRetryAttemptAt
+		snapshot.LastRetryAttemptAt = &lastRetryAttemptAt
+	}
+	if snapshot.LastExhaustedRetryAt != nil {
+		lastExhaustedRetryAt := *snapshot.LastExhaustedRetryAt
+		snapshot.LastExhaustedRetryAt = &lastExhaustedRetryAt
+	}
+	if snapshot.LastDLQStoredAt != nil {
+		lastDLQStoredAt := *snapshot.LastDLQStoredAt
+		snapshot.LastDLQStoredAt = &lastDLQStoredAt
+	}
+	if snapshot.LastDLQStoreFailureAt != nil {
+		lastDLQStoreFailureAt := *snapshot.LastDLQStoreFailureAt
+		snapshot.LastDLQStoreFailureAt = &lastDLQStoreFailureAt
+	}
+
+	return snapshot
+}
+
+func classifyParseError(err error) (entity.DLQErrorType, bool) {
+	if err == nil {
+		return "", false
+	}
+
+	message := err.Error()
+	switch {
+	case errors.Is(err, errTransactionHasNoInMsg), strings.Contains(message, errTransactionHasNoInMsg.Error()):
+		return "", false
+	case strings.Contains(message, "event validation failed"):
+		return entity.DLQErrorTypeValidation, true
+	default:
+		return entity.DLQErrorTypeParse, true
+	}
+}
+
+func (uc *BlockchainSubscriberUseCase) storeFailedTransaction(
+	ctx context.Context,
+	tx *toncenter.Transaction,
+	err error,
+	errorType entity.DLQErrorType,
+) {
+	if uc.dlqUseCase == nil {
+		return
+	}
+
+	uc.recordDLQStoreAttempt(errorType)
+
+	result, dlqErr := uc.dlqUseCase.StoreFailedTransaction(ctx, *tx, err, errorType)
+	if dlqErr != nil {
+		if uc.metrics != nil {
+			uc.metrics.RecordEventFailed(dlqMetricsLabel, "store_error")
+		}
+		uc.recordDLQStoreFailure(tx, dlqErr)
+		uc.logger.Error("Failed to store transaction in DLQ: tx=%s, error=%v", tx.Hash(), dlqErr)
+		return
+	}
+
+	switch {
+	case result == nil:
+		uc.recordDLQStored(tx, errorType, nil)
+	case result.Outcome == DLQStoreOutcomeAlreadyPending:
+		if uc.metrics != nil {
+			uc.metrics.RecordEventFailed(dlqMetricsLabel, "duplicate")
+		}
+		uc.recordDLQDuplicate(tx, errorType, result)
+	default:
+		uc.recordDLQStored(tx, errorType, result)
+	}
+}
+
+func (uc *BlockchainSubscriberUseCase) recordParseFailure(
+	tx *toncenter.Transaction,
+	err error,
+	errorType entity.DLQErrorType,
+) {
+	now := time.Now()
+
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	switch errorType {
+	case entity.DLQErrorTypeParse, entity.DLQErrorTypePersistence, entity.DLQErrorTypeUnknown:
+		uc.observability.ParseFailuresTotal++
+	case entity.DLQErrorTypeValidation:
+		uc.observability.ValidationFailuresTotal++
+	}
+
+	uc.observability.LastFailureType = errorType
+	uc.observability.LastFailureError = err.Error()
+	uc.observability.LastFailureTxHash = tx.Hash()
+	uc.observability.LastFailureTxLt = tx.Lt()
+	uc.observability.LastFailureAt = &now
+}
+
+func (uc *BlockchainSubscriberUseCase) recordRetryAttempt(event *entity.GameEvent, err error) {
+	now := time.Now()
+
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.PersistenceRetryAttemptsTotal++
+	uc.observability.LastFailureType = entity.DLQErrorTypePersistence
+	uc.observability.LastFailureError = err.Error()
+	uc.observability.LastRetryOutcome = "retrying"
+	uc.observability.LastRetriedEventType = event.EventType
+	uc.observability.LastRetriedGameID = event.GameID
+	uc.observability.LastRetryAttemptAt = &now
+}
+
+func (uc *BlockchainSubscriberUseCase) recordRetryRecovered(event *entity.GameEvent) {
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.PersistenceRetryRecoveredTotal++
+	uc.observability.LastRetryOutcome = "recovered"
+	uc.observability.LastRetriedEventType = event.EventType
+	uc.observability.LastRetriedGameID = event.GameID
+}
+
+func (uc *BlockchainSubscriberUseCase) recordRetryExhausted(event *entity.GameEvent, err error) {
+	now := time.Now()
+
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.PersistenceFailuresExhausted++
+	uc.observability.LastFailureType = entity.DLQErrorTypePersistence
+	uc.observability.LastFailureError = err.Error()
+	uc.observability.LastRetryOutcome = "exhausted"
+	uc.observability.LastRetriedEventType = event.EventType
+	uc.observability.LastRetriedGameID = event.GameID
+	uc.observability.LastExhaustedRetryAt = &now
+}
+
+func (uc *BlockchainSubscriberUseCase) recordDLQStoreAttempt(errorType entity.DLQErrorType) {
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.DLQStoreAttemptsTotal++
+	uc.observability.LastDLQErrorType = errorType
+	uc.observability.LastDLQStoreOutcome = ""
+}
+
+func (uc *BlockchainSubscriberUseCase) recordDLQStored(
+	tx *toncenter.Transaction,
+	errorType entity.DLQErrorType,
+	result *StoreFailedTransactionResult,
+) {
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.DLQStoredTotal++
+	uc.applyDLQStoreResult(tx, errorType, DLQStoreOutcomeQueued, result)
+}
+
+func (uc *BlockchainSubscriberUseCase) recordDLQDuplicate(
+	tx *toncenter.Transaction,
+	errorType entity.DLQErrorType,
+	result *StoreFailedTransactionResult,
+) {
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.DLQDuplicateTotal++
+	uc.applyDLQStoreResult(tx, errorType, DLQStoreOutcomeAlreadyPending, result)
+}
+
+func (uc *BlockchainSubscriberUseCase) recordDLQStoreFailure(tx *toncenter.Transaction, err error) {
+	now := time.Now()
+
+	uc.observabilityMu.Lock()
+	defer uc.observabilityMu.Unlock()
+
+	uc.observability.DLQStoreFailuresTotal++
+	uc.observability.LastDLQStoreFailure = err.Error()
+	uc.observability.LastDLQStoreFailureTxHash = tx.Hash()
+	uc.observability.LastDLQStoreFailureTxLt = tx.Lt()
+	uc.observability.LastDLQStoreFailureAt = &now
+}
+
+func (uc *BlockchainSubscriberUseCase) applyDLQStoreResult(
+	tx *toncenter.Transaction,
+	errorType entity.DLQErrorType,
+	outcome DLQStoreOutcome,
+	result *StoreFailedTransactionResult,
+) {
+	now := time.Now()
+
+	uc.observability.LastDLQErrorType = errorType
+	uc.observability.LastDLQStoreOutcome = outcome
+	uc.observability.LastDLQStatus = entity.DLQStatusPending
+	uc.observability.LastDLQResolutionNotes = ""
+	uc.observability.LastDLQStoredTxHash = tx.Hash()
+	uc.observability.LastDLQStoredTxLt = tx.Lt()
+	uc.observability.LastDLQStoredAt = &now
+	if result != nil {
+		uc.observability.LastDLQStatus = result.Status
+		uc.observability.LastDLQResolutionNotes = result.ResolutionNotes
+	}
+}
+
+func (uc *BlockchainSubscriberUseCase) waitForRetry(
+	ctx context.Context,
+	event *entity.GameEvent,
+	lastErr error,
+	attempt int,
+	backoff time.Duration,
+) (time.Duration, error) {
+	uc.recordRetryAttempt(event, lastErr)
+
+	if uc.metrics != nil {
+		uc.metrics.RecordEventFailed(event.EventType, "retry")
+	}
+
+	uc.logger.Warn("Retrying %s event for game_id=%d (attempt %d/%d, backoff=%v)",
+		event.EventType, event.GameID, attempt, uc.retryConfig.MaxRetries, backoff)
+
+	select {
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	case <-time.After(backoff):
+	}
+
+	nextBackoff := time.Duration(float64(backoff) * uc.retryConfig.BackoffMultiplier)
+	if nextBackoff > uc.retryConfig.MaxBackoff {
+		nextBackoff = uc.retryConfig.MaxBackoff
+	}
+
+	return nextBackoff, nil
 }

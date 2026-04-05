@@ -95,6 +95,9 @@ func (f *EventSourceFactory) CreateEventSource(handler EventHandler) (EventSourc
 		}, f.logger)
 
 		subscriber.Subscribe(handler)
+		if f.onLtUpdated != nil {
+			subscriber.SetOnLtUpdated(f.onLtUpdated)
+		}
 		f.currentSource = subscriber
 
 		return subscriber, nil
@@ -124,8 +127,16 @@ func (f *EventSourceFactory) fallbackToHTTP(handler EventHandler) {
 	f.sourceMu.Lock()
 	defer f.sourceMu.Unlock()
 
+	ctx := context.Background()
+
 	// Stop current source if running
 	if f.currentSource != nil {
+		if subscriber, ok := f.currentSource.(*WebSocketSubscriber); ok {
+			if subscriberCtx := subscriber.Context(); subscriberCtx != nil {
+				ctx = subscriberCtx
+			}
+		}
+
 		// Get last processed lt before stopping
 		lastLt := f.currentSource.GetLastProcessedLt()
 		f.currentSource.Stop()
@@ -141,7 +152,6 @@ func (f *EventSourceFactory) fallbackToHTTP(handler EventHandler) {
 		}
 
 		// Start the poller
-		ctx := context.Background()
 		poller.Start(ctx)
 	}
 
@@ -224,6 +234,9 @@ func (f *EventSourceFactory) SwitchToWebSocket(ctx context.Context, handler Even
 
 	subscriber.Subscribe(handler)
 	subscriber.SetLastProcessedLt(lastLt)
+	if f.onLtUpdated != nil {
+		subscriber.SetOnLtUpdated(f.onLtUpdated)
+	}
 	f.currentSource = subscriber
 
 	// Start the WebSocket subscriber
@@ -267,8 +280,11 @@ func (f *EventSourceFactory) SetOnLtUpdated(callback func(lt string)) {
 
 	f.onLtUpdated = callback
 
-	// If current source is a poller, set callback on it
+	// If current source supports lt update callbacks, set it immediately.
 	if poller, ok := f.currentSource.(*Poller); ok {
 		poller.SetOnLtUpdated(callback)
+	}
+	if subscriber, ok := f.currentSource.(*WebSocketSubscriber); ok {
+		subscriber.SetOnLtUpdated(callback)
 	}
 }

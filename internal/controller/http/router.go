@@ -9,7 +9,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
-
 	"pod-backend/config"
 	_ "pod-backend/docs" // Swagger docs.
 	blockchainctrl "pod-backend/internal/controller/blockchain"
@@ -34,6 +33,7 @@ type RouterDeps struct {
 	BroadcastUC       *usecase.GameBroadcastUseCase
 	TONClient         *toncenter.Client
 	BlockchainHandler *blockchainctrl.TONEventHandler
+	SyncStateRepo     repository.BlockchainSyncStateRepository
 	PG                *postgres.Postgres
 	GameRepo          repository.GameRepository
 }
@@ -95,7 +95,7 @@ func NewRouter(app *fiber.App, cfg *config.Config, deps RouterDeps) {
 	app.Get("/healthz", func(ctx *fiber.Ctx) error { return ctx.SendStatus(http.StatusOK) })
 
 	// Health check endpoint
-	healthHandler := rest.NewHealthHandler(deps.PG.Pool, &zerologger, deps.TONClient)
+	healthHandler := rest.NewHealthHandler(deps.PG.Pool, &zerologger, deps.TONClient, deps.SyncStateRepo)
 	// T162: Wire up event source provider for health reporting
 	if deps.BlockchainHandler != nil {
 		healthHandler.SetEventSourceProvider(deps.BlockchainHandler)

@@ -100,6 +100,8 @@ type (
 		EnableWebSocket       bool   `env:"ENABLE_WEBSOCKET" envDefault:"false"`       // Enable WebSocket event streaming
 		WebSocketReconnectMax int    `env:"WS_RECONNECT_MAX_ATTEMPTS" envDefault:"10"` // Max reconnection attempts before fallback
 		WebSocketPingInterval string `env:"WS_PING_INTERVAL" envDefault:"30s"`         // WebSocket ping interval for health check
+		ResumeFromCheckpoint  bool   `env:"BLOCKCHAIN_RESUME_FROM_CHECKPOINT" envDefault:"true"`
+		ResumeEventSource     bool   `env:"BLOCKCHAIN_RESUME_EVENT_SOURCE" envDefault:"true"`
 		// Blockchain Polling Configuration
 		MinPollInterval string `env:"MIN_POLL_INTERVAL" envDefault:"5s"`  // Minimum polling interval when active
 		MaxPollInterval string `env:"MAX_POLL_INTERVAL" envDefault:"30s"` // Maximum polling interval when idle

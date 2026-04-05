@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -13,19 +14,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-
 	"pod-backend/config"
 	blockchainctrl "pod-backend/internal/controller/blockchain"
 	"pod-backend/internal/controller/http"
 	websocketctrl "pod-backend/internal/controller/websocket"
 	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/infrastructure/toncenter"
+	"pod-backend/internal/repository"
 	repopg "pod-backend/internal/repository/postgres"
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/httpserver"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
-	"strconv"
 )
 
 // Prometheus metrics (T059, T121)
@@ -118,32 +118,49 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
 	gamePersistenceUC.SetTxManager(txManager)              // Enable transactional operations for atomic updates
 	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC) // Wire WebSocket broadcasting
+	gamePersistenceUC.SetReservationUseCase(reservationUC) // Consume reservations once a join lands on-chain
 
 	// Initialize blockchain metrics (T097)
 	blockchainMetrics := metrics.NewBlockchainMetrics()
 
+	ctx := context.Background()
+	syncCheckpoint, err := syncStateRepo.Get(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("Failed to load blockchain sync checkpoint from database, starting from configured defaults")
+		syncCheckpoint = nil
+	}
+
 	// Initialize blockchain event handler (T094, T095)
-	blockchainHandler, err := blockchainctrl.NewTONEventHandler(cfg, gamePersistenceUC, l)
+	blockchainHandler, err := blockchainctrl.NewTONEventHandler(cfg, gamePersistenceUC, l, syncCheckpoint)
 	if err != nil {
 		l.Fatal(fmt.Errorf("app - Run - blockchainctrl.NewTONEventHandler: %w", err))
 	}
 
-	// Load last processed lt from database to resume from saved state
-	ctx := context.Background()
-	lastLt, err := syncStateRepo.GetLastProcessedLt(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("Failed to load last processed lt from database, starting from 0")
-		lastLt = "0"
-	}
-	if lastLt != "0" {
-		log.Info().Str("lt", lastLt).Msg("Resuming blockchain subscription from saved state")
-		blockchainHandler.SetLastProcessedLt(lastLt)
+	persistCheckpoint := func(checkpoint blockchainctrl.SyncCheckpoint) {
+		sourceType := repository.EventSourceType(checkpoint.EventSourceType)
+		if sourceType == "" {
+			sourceType = repository.EventSourceType(cfg.GameBackend.BlockchainEventSource)
+		}
+
+		if err := syncStateRepo.PersistCheckpoint(
+			ctx,
+			checkpoint.LastProcessedLt,
+			sourceType,
+			checkpoint.EventSourceConnected,
+		); err != nil {
+			log.Error().
+				Err(err).
+				Str("lt", checkpoint.LastProcessedLt).
+				Str("event_source_type", checkpoint.EventSourceType).
+				Bool("event_source_connected", checkpoint.EventSourceConnected).
+				Msg("Failed to persist blockchain sync checkpoint")
+		}
 	}
 
-	// Set callback to persist lt updates to database
-	blockchainHandler.SetOnLtUpdated(func(lt string) {
-		if err := syncStateRepo.UpdateLastProcessedLt(ctx, lt); err != nil {
-			log.Error().Err(err).Str("lt", lt).Msg("Failed to persist last processed lt")
+	blockchainHandler.SetOnCheckpointUpdated(persistCheckpoint)
+	blockchainHandler.SetOnFallback(func(blockchainctrl.SyncCheckpoint) {
+		if err := syncStateRepo.RecordFallback(ctx); err != nil {
+			log.Error().Err(err).Msg("Failed to record blockchain source fallback")
 		}
 	})
 
@@ -166,6 +183,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		BroadcastUC:       gameBroadcastUC,
 		TONClient:         tonClient,
 		BlockchainHandler: blockchainHandler,
+		SyncStateRepo:     syncStateRepo,
 		PG:                pg,
 		GameRepo:          gameRepo,
 	}

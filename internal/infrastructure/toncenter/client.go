@@ -88,7 +88,6 @@ func (c *Client) GetTransactions(ctx context.Context, limit int, lt *uint64, has
 	result, err := c.circuitBreaker.Execute(func() (interface{}, error) {
 		return c.doGetTransactions(ctx, limit, lt, hash)
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("circuit breaker: %w", err)
 	}
@@ -146,7 +145,8 @@ func (c *Client) doGetTransactions(ctx context.Context, limit int, lt *uint64, h
 		return nil, fmt.Errorf("API error: %s", response.Error)
 	}
 
-	return response.Result, nil
+	normalized, _ := normalizeTransactionsByLt(response.Result, false)
+	return normalized, nil
 }
 
 // GetCircuitBreakerState returns the current state of the circuit breaker.

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
 	"pod-backend/pkg/postgres"
@@ -43,6 +42,7 @@ func (r *DeadLetterQueueRepository) Create(ctx context.Context, entry *entity.De
 			"max_retries",
 			"status",
 			"next_retry_at",
+			"resolution_notes",
 		).
 		Values(
 			entry.TransactionHash,
@@ -54,15 +54,24 @@ func (r *DeadLetterQueueRepository) Create(ctx context.Context, entry *entity.De
 			entry.MaxRetries,
 			entry.Status,
 			entry.NextRetryAt,
+			entry.ResolutionNotes,
 		).
 		Suffix("ON CONFLICT (transaction_hash, transaction_lt) WHERE status IN ('pending', 'retrying') DO NOTHING").
-		Suffix("RETURNING id, created_at").
+		Suffix("RETURNING id, retry_count, max_retries, created_at, next_retry_at, status, resolution_notes").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(&entry.ID, &entry.CreatedAt)
+	err = r.pg.Pool.QueryRow(ctx, sql, args...).Scan(
+		&entry.ID,
+		&entry.RetryCount,
+		&entry.MaxRetries,
+		&entry.CreatedAt,
+		&entry.NextRetryAt,
+		&entry.Status,
+		&entry.ResolutionNotes,
+	)
 	if err != nil {
 		// Check if it was a conflict (no rows returned)
 		if err == pgx.ErrNoRows {
@@ -392,7 +401,31 @@ func (r *DeadLetterQueueRepository) GetStats(ctx context.Context) (*repository.D
 			COALESCE(SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END), 0) as resolved,
 			COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) as failed,
 			COUNT(*) as total,
-			MIN(CASE WHEN status IN ('pending', 'retrying') THEN created_at END) as oldest_pending
+			COALESCE(SUM(CASE WHEN error_type = 'parse_error' THEN 1 ELSE 0 END), 0) as parse_errors,
+			COALESCE(SUM(CASE WHEN error_type = 'persistence_error' THEN 1 ELSE 0 END), 0) as persistence_errors,
+			COALESCE(SUM(CASE WHEN error_type = 'validation_error' THEN 1 ELSE 0 END), 0) as validation_errors,
+			COALESCE(SUM(CASE WHEN error_type = 'unknown' THEN 1 ELSE 0 END), 0) as unknown_errors,
+			COALESCE(SUM(
+				CASE
+					WHEN status IN ('pending', 'retrying')
+						AND retry_count < max_retries
+						AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+					THEN 1 ELSE 0
+				END
+			), 0) as ready_for_retry,
+			COALESCE(SUM(
+				CASE
+					WHEN status IN ('pending', 'retrying') AND retry_count >= max_retries
+					THEN 1 ELSE 0
+				END
+			), 0) as exhausted_retry,
+			MIN(CASE WHEN status IN ('pending', 'retrying') THEN created_at END) as oldest_pending,
+			MIN(
+				CASE
+					WHEN status IN ('pending', 'retrying') AND retry_count < max_retries
+					THEN next_retry_at
+				END
+			) as next_scheduled_retry_at
 		FROM dead_letter_queue
 	`
 
@@ -403,7 +436,14 @@ func (r *DeadLetterQueueRepository) GetStats(ctx context.Context) (*repository.D
 		&stats.ResolvedCount,
 		&stats.FailedCount,
 		&stats.TotalCount,
+		&stats.ParseErrorCount,
+		&stats.PersistenceErrorCount,
+		&stats.ValidationErrorCount,
+		&stats.UnknownErrorCount,
+		&stats.ReadyForRetryCount,
+		&stats.ExhaustedRetryCount,
 		&stats.OldestPending,
+		&stats.NextScheduledRetryAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("execute query: %w", err)

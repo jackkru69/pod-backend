@@ -208,6 +208,17 @@ func (b *TestMessageBuilder) BuildInsufficientBalanceNotify(gameID int64, requir
 	return base64.StdEncoding.EncodeToString(boc)
 }
 
+// BuildOpcodeOnlyMessage creates a BOC-encoded message containing only an opcode.
+// Useful for testing unsupported or truncated payload handling.
+func (b *TestMessageBuilder) BuildOpcodeOnlyMessage(opcode uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(opcode), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
 // CreateInMsgJSON creates a JSON structure matching TON Center API format.
 // This is used to build test transactions with proper in_msg structure.
 func (b *TestMessageBuilder) CreateInMsgJSON(source, destination, value, messageBase64 string) string {

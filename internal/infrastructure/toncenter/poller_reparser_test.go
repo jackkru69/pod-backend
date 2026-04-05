@@ -3,6 +3,7 @@ package toncenter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestPoller_DeepBackfilling simulates a scenario where the poller is far behind
@@ -185,4 +187,186 @@ func TestPoller_DeepBackfilling(t *testing.T) {
 	// Loop 3: oldest=51, prev=50. Condition fails.
 	// So 2 logs.
 	assert.GreaterOrEqual(t, backfillCount, 2, "Should have logged backfilling at least twice")
+}
+
+type pollerFailOnLtOnceHandler struct {
+	failLt    string
+	failed    bool
+	handledLt []string
+}
+
+func (h *pollerFailOnLtOnceHandler) HandleTransaction(_ context.Context, tx Transaction) error {
+	h.handledLt = append(h.handledLt, tx.Lt())
+	if tx.Lt() == h.failLt && !h.failed {
+		h.failed = true
+		return errors.New("boom")
+	}
+
+	return nil
+}
+
+func TestPoller_RetriesFailedTransactionFromLastSuccessfulCheckpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			OK     bool          `json:"ok"`
+			Result []Transaction `json:"result"`
+		}{
+			OK: true,
+			Result: []Transaction{
+				createTransactionWithPrev("120", "110"),
+				createTransactionWithPrev("110", "105"),
+				createTransactionWithPrev("105", "100"),
+			},
+		}
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		V2BaseURL:             server.URL,
+		ContractAddress:       "addr",
+		CircuitBreakerMaxFail: 5,
+		CircuitBreakerTimeout: time.Second,
+		HTTPTimeout:           time.Second,
+	}
+	client := NewClient(cfg)
+	logger := &MockLogger{}
+	handler := &pollerFailOnLtOnceHandler{failLt: "110"}
+
+	poller := NewPoller(client, handler, logger, 0)
+	poller.lastProcessedLt = "100"
+	poller.ticker = time.NewTicker(time.Hour)
+	defer poller.ticker.Stop()
+
+	var persistedLt []string
+	poller.SetOnLtUpdated(func(lt string) {
+		persistedLt = append(persistedLt, lt)
+	})
+
+	poller.poll(context.Background())
+
+	assert.Equal(t, []string{"105", "110"}, handler.handledLt)
+	assert.Equal(t, "105", poller.GetLastProcessedLt())
+	assert.Equal(t, []string{"105"}, persistedLt)
+
+	poller.poll(context.Background())
+
+	assert.Equal(t, []string{"105", "110", "110", "120"}, handler.handledLt)
+	assert.Equal(t, "120", poller.GetLastProcessedLt())
+	assert.Equal(t, []string{"105", "120"}, persistedLt)
+}
+
+func TestPoller_DeduplicatesInitialAndBackfilledTransactions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lt := r.URL.Query().Get("lt")
+
+		resp := struct {
+			OK     bool          `json:"ok"`
+			Result []Transaction `json:"result"`
+		}{
+			OK: true,
+		}
+
+		switch lt {
+		case "":
+			resp.Result = []Transaction{
+				createTransactionWithPrev("120", "110"),
+				createTransactionWithPrev("120", "110"),
+				createTransactionWithPrev("110", "105"),
+			}
+		case "105":
+			resp.Result = []Transaction{
+				createTransactionWithPrev("110", "105"),
+				createTransactionWithPrev("105", "100"),
+			}
+		}
+
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		V2BaseURL:             server.URL,
+		ContractAddress:       "addr",
+		CircuitBreakerMaxFail: 5,
+		CircuitBreakerTimeout: time.Second,
+		HTTPTimeout:           time.Second,
+	}
+	client := NewClient(cfg)
+	logger := &MockLogger{}
+	handler := &MockEventHandler{}
+
+	poller := NewPoller(client, handler, logger, 0)
+	poller.lastProcessedLt = "100"
+	poller.ticker = time.NewTicker(time.Hour)
+	defer poller.ticker.Stop()
+
+	poller.poll(context.Background())
+
+	assert.Equal(t, []string{"105", "110", "120"}, []string{
+		handler.HandledTxs[0].Lt(),
+		handler.HandledTxs[1].Lt(),
+		handler.HandledTxs[2].Lt(),
+	})
+	assert.Equal(t, "120", poller.GetLastProcessedLt())
+}
+
+func TestPoller_ProcessesOutOfOrderTransactionsChronologically(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := struct {
+			OK     bool          `json:"ok"`
+			Result []Transaction `json:"result"`
+		}{
+			OK: true,
+			Result: []Transaction{
+				createTransactionWithPrev("120", "110"),
+				createTransactionWithPrev("105", "100"),
+				createTransactionWithPrev("110", "105"),
+			},
+		}
+
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		V2BaseURL:             server.URL,
+		ContractAddress:       "addr",
+		CircuitBreakerMaxFail: 5,
+		CircuitBreakerTimeout: time.Second,
+		HTTPTimeout:           time.Second,
+	}
+	client := NewClient(cfg)
+	logger := &MockLogger{}
+	handler := &MockEventHandler{}
+
+	poller := NewPoller(client, handler, logger, 0)
+	poller.lastProcessedLt = "100"
+	poller.ticker = time.NewTicker(time.Hour)
+	defer poller.ticker.Stop()
+
+	poller.poll(context.Background())
+
+	assert.Equal(t, []string{"105", "110", "120"}, []string{
+		handler.HandledTxs[0].Lt(),
+		handler.HandledTxs[1].Lt(),
+		handler.HandledTxs[2].Lt(),
+	})
+	assert.Equal(t, "120", poller.GetLastProcessedLt())
+}
+
+func createTransactionWithPrev(lt string, prevLt string) Transaction {
+	return Transaction{
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Type: "internal.transactionId",
+			Lt:   lt,
+			Hash: "hash_" + lt,
+		},
+		PrevTransLt:   prevLt,
+		PrevTransHash: "hash_" + prevLt,
+	}
 }

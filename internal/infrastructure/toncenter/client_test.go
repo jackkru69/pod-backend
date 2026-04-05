@@ -53,3 +53,33 @@ func TestClient_GetTransactions_URLConstruction(t *testing.T) {
 	_, err = client.GetTransactions(context.Background(), 10, &lt, &hash)
 	assert.NoError(t, err)
 }
+
+func TestClient_GetTransactions_NormalizesOrderAndDuplicates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"ok": true,
+			"result": [
+				{"transaction_id":{"lt":"100","hash":"hash_100"}},
+				{"transaction_id":{"lt":"300","hash":"hash_300"}},
+				{"transaction_id":{"lt":"200","hash":"hash_200"}},
+				{"transaction_id":{"lt":"300","hash":"hash_300"}}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	cfg := ClientConfig{
+		V2BaseURL:             server.URL,
+		ContractAddress:       "EQD...",
+		CircuitBreakerMaxFail: 5,
+		CircuitBreakerTimeout: time.Second,
+		HTTPTimeout:           time.Second,
+	}
+	client := NewClient(cfg)
+
+	txs, err := client.GetTransactions(context.Background(), 10, nil, nil)
+	assert.NoError(t, err)
+	assert.Len(t, txs, 3)
+	assert.Equal(t, []string{"300", "200", "100"}, []string{txs[0].Lt(), txs[1].Lt(), txs[2].Lt()})
+}
