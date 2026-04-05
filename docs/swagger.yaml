@@ -486,9 +486,10 @@ paths:
       - reservations
   /api/v1/health:
     get:
-      description: Returns service health status including database connectivity,
-        TON Center reachability, active event source, and parser checkpoint/recovery
-        details
+      description: Returns the authoritative operator/frontend health surface,
+        including database connectivity, TON Center reachability, active event
+        source, and parser checkpoint/recovery details used by the health banner
+        and restart validation flows.
       produces:
       - application/json
       responses:
@@ -500,7 +501,7 @@ paths:
           description: Service is unhealthy
           schema:
             $ref: '#/definitions/rest.ErrorResponse'
-      summary: Health check endpoint
+      summary: Operator and parser health endpoint
       tags:
       - health
   /api/v1/reservations:

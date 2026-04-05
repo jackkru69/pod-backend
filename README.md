@@ -99,6 +99,25 @@ the migrate-enabled flow.
 
 The backend will listen on the port configured by `HTTP_PORT`.
 
+### 4. Quick operator validation
+
+Once the app is running, verify the completion-critical interfaces before moving
+to frontend checks:
+
+```bash
+curl http://localhost:8090/api/v1/health
+curl http://localhost:8090/health
+```
+
+Use `/api/v1/health` as the authoritative operator/frontend surface. Confirm the
+response includes:
+
+- top-level `status`, `database`, `event_source_status`, and `event_source_type`
+- nested `parser.status`, `parser.recovery_status`, `parser.last_processed_lt`,
+  `parser.checkpoint_updated_at`, and fallback telemetry
+
+Keep `/health` and `/healthz` for lightweight liveness probes only.
+
 ## Core Environment Variables
 
 Use `.env.example` as the canonical reference. Core settings include:
