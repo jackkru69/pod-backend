@@ -34,7 +34,7 @@ require (
 	github.com/swaggo/swag v1.16.6
 	github.com/ulule/limiter/v3 v3.11.2
 	github.com/valyala/fasthttp v1.68.0
-	github.com/xssnick/tonutils-go v1.15.5
+	github.com/xssnick/tonutils-go v1.16.0
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.39.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.39.0
@@ -395,7 +395,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.44.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250911091902-df9299821621 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
