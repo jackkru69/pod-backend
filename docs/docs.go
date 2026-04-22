@@ -314,6 +314,161 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/games/{gameId}/reveal-reservation": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reveal-reservations"
+                ],
+                "summary": "Get current reveal reservation for a game",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReservationEnvelope"
+                        }
+                    },
+                    "204": {
+                        "description": "No reveal reservation exists"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/{gameId}/reveal-reserve": {
+            "post": {
+                "description": "Off-chain advisory lock that prevents two concurrent callers from sending the same OpenBid for the same game.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reveal-reservations"
+                ],
+                "summary": "Reserve the reveal slot for a game",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Reveal reservation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReserveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReservationEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reveal-reservations"
+                ],
+                "summary": "Cancel a reveal reservation (holder-only)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancellation request with wallet address",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReserveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Cancelled"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/health": {
             "get": {
                 "description": "Returns service health status including database connectivity, TON Center reachability, active event source, and parser checkpoint/recovery details",
@@ -377,6 +532,98 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reveal-reservations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reveal-reservations"
+                ],
+                "summary": "List active reveal reservations for a wallet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet address",
+                        "name": "wallet",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReservationListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reveal-reserve": {
+            "post": {
+                "description": "All-or-nothing reservation. Useful for piggyback OpenBid that bundles several game IDs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reveal-reservations"
+                ],
+                "summary": "Reserve the reveal slot for a batch of games (atomic)",
+                "parameters": [
+                    {
+                        "description": "Batched reveal reservation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReserveBatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/rest.RevealReservationListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/rest.ErrorResponse"
                         }
@@ -938,6 +1185,75 @@ const docTemplate = `{
             }
         },
         "rest.ReserveRequest": {
+            "type": "object",
+            "required": [
+                "wallet_address"
+            ],
+            "properties": {
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.RevealReservationEnvelope": {
+            "type": "object",
+            "properties": {
+                "reservation": {
+                    "$ref": "#/definitions/rest.RevealReservationResponse"
+                }
+            }
+        },
+        "rest.RevealReservationListResponse": {
+            "type": "object",
+            "properties": {
+                "reservations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rest.RevealReservationResponse"
+                    }
+                }
+            }
+        },
+        "rest.RevealReservationResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.RevealReserveBatchRequest": {
+            "type": "object",
+            "required": [
+                "game_ids",
+                "wallet_address"
+            ],
+            "properties": {
+                "game_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.RevealReserveRequest": {
             "type": "object",
             "required": [
                 "wallet_address"

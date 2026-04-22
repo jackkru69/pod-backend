@@ -18,6 +18,11 @@ const (
 	MessageTypeReservationReleased = "reservation_released"
 	MessageTypeGameStateUpdate     = "game_state_update"
 
+	// Reveal-phase reservation events (spec 005-reveal-reservation). Additive
+	// only; existing event envelopes are unchanged.
+	MessageTypeRevealReservationCreated  = "reveal_reservation_created"
+	MessageTypeRevealReservationReleased = "reveal_reservation_released"
+
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
 )
@@ -52,6 +57,25 @@ type ReservationReleasedEvent struct {
 	Timestamp string `json:"timestamp"`
 	GameID    int64  `json:"game_id"`
 	Reason    string `json:"reason"` // "expired", "cancelled", "joined"
+}
+
+// RevealReservationCreatedEvent is sent when a reveal-phase reservation is
+// created (spec 005-reveal-reservation).
+type RevealReservationCreatedEvent struct {
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	GameID     int64  `json:"game_id"`
+	ReservedBy string `json:"reserved_by"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// RevealReservationReleasedEvent is sent when a reveal-phase reservation is
+// released (cancelled/expired/revealed).
+type RevealReservationReleasedEvent struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	GameID    int64  `json:"game_id"`
+	Reason    string `json:"reason"` // "expired", "cancelled", "revealed"
 }
 
 type GameStateUpdateEvent struct {
@@ -288,6 +312,34 @@ func (uc *GameBroadcastUseCase) BroadcastReservationCreated(ctx context.Context,
 func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context, gameID int64, reason string) error {
 	event := ReservationReleasedEvent{
 		Type:      MessageTypeReservationReleased,
+		Timestamp: websocketTimestamp(time.Now()),
+		GameID:    gameID,
+		Reason:    reason,
+	}
+
+	return uc.broadcastEvent(ctx, gameID, event)
+}
+
+// BroadcastRevealReservationCreated sends a reveal-reservation created event
+// (spec 005-reveal-reservation). Additive event type; envelope is the same
+// shape as ReservationCreatedEvent so existing client handlers can reuse field
+// access patterns.
+func (uc *GameBroadcastUseCase) BroadcastRevealReservationCreated(ctx context.Context, r *entity.RevealReservation) error {
+	event := RevealReservationCreatedEvent{
+		Type:       MessageTypeRevealReservationCreated,
+		Timestamp:  websocketTimestamp(time.Now()),
+		GameID:     r.GameID,
+		ReservedBy: r.WalletAddress,
+		ExpiresAt:  r.ExpiresAt.Format(time.RFC3339),
+	}
+
+	return uc.broadcastEvent(ctx, r.GameID, event)
+}
+
+// BroadcastRevealReservationReleased sends a reveal-reservation released event.
+func (uc *GameBroadcastUseCase) BroadcastRevealReservationReleased(ctx context.Context, gameID int64, reason string) error {
+	event := RevealReservationReleasedEvent{
+		Type:      MessageTypeRevealReservationReleased,
 		Timestamp: websocketTimestamp(time.Now()),
 		GameID:    gameID,
 		Reason:    reason,

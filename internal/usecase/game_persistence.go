@@ -16,12 +16,13 @@ import (
 // FR-011 (validate blockchain data), FR-012 (store outcomes).
 // T093: Integrated with GameBroadcastUseCase for real-time WebSocket updates.
 type GamePersistenceUseCase struct {
-	gameRepo    repository.GameRepository
-	eventRepo   repository.GameEventRepository
-	userRepo    repository.UserRepository
-	txManager   repository.TxManager  // Optional: for transactional operations
-	broadcastUC *GameBroadcastUseCase // Optional: nil when WebSocket not enabled
-	reserveUC   *ReservationUseCase   // Optional: nil when reservation lifecycle is not enabled
+	gameRepo        repository.GameRepository
+	eventRepo       repository.GameEventRepository
+	userRepo        repository.UserRepository
+	txManager       repository.TxManager      // Optional: for transactional operations
+	broadcastUC     *GameBroadcastUseCase     // Optional: nil when WebSocket not enabled
+	reserveUC       *ReservationUseCase       // Optional: nil when reservation lifecycle is not enabled
+	revealReserveUC *RevealReservationUseCase // Optional: nil when reveal-reservation feature is disabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -56,6 +57,22 @@ func (uc *GamePersistenceUseCase) SetBroadcastUseCase(broadcastUC *GameBroadcast
 // consume active lobby reservations.
 func (uc *GamePersistenceUseCase) SetReservationUseCase(reservationUC *ReservationUseCase) {
 	uc.reserveUC = reservationUC
+}
+
+// SetRevealReservationUseCase wires the reveal-phase reservation use case so
+// terminal on-chain transitions release advisory reveal locks (spec
+// 005-reveal-reservation). Optional.
+func (uc *GamePersistenceUseCase) SetRevealReservationUseCase(revealUC *RevealReservationUseCase) {
+	uc.revealReserveUC = revealUC
+}
+
+// releaseRevealReservationIfAny is a small helper called after the DB write of
+// a terminal status has committed. Idempotent.
+func (uc *GamePersistenceUseCase) releaseRevealReservationIfAny(ctx context.Context, gameID int64) {
+	if uc.revealReserveUC == nil {
+		return
+	}
+	uc.revealReserveUC.ReleaseOnTerminal(ctx, gameID)
 }
 
 // extractInt64 extracts an int64 from event data, handling both int64 and float64 types.
@@ -457,6 +474,8 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 	if event.ID != 0 {
 		// Broadcast game update to WebSocket subscribers (T093)
 		uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeFinished)
+		// Release any reveal-phase reservation now that the game is terminal (spec 005).
+		uc.releaseRevealReservationIfAny(ctx, event.GameID)
 	}
 
 	return nil
@@ -522,6 +541,9 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 	// Broadcast game update to WebSocket subscribers (T093)
 	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeDraw)
 
+	// Terminal status: release any reveal-phase reservation (spec 005).
+	uc.releaseRevealReservationIfAny(ctx, event.GameID)
+
 	return nil
 }
 
@@ -565,6 +587,9 @@ func (uc *GamePersistenceUseCase) HandleGameCancelled(ctx context.Context, event
 
 	// Broadcast game update to WebSocket subscribers (T093)
 	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeCancelled)
+
+	// Terminal status: release any reveal-phase reservation (spec 005).
+	uc.releaseRevealReservationIfAny(ctx, event.GameID)
 
 	return nil
 }

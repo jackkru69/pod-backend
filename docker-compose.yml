@@ -72,8 +72,7 @@ services:
   nats:
     container_name: nats
     image: nats:2.12-alpine
-    command:
-      ["-m", "8222", "-sd", "/nats-data", "-user", "guest", "-pass", "guest"]
+    command: [ "-m", "8222", "-sd", "/nats-data", "-user", "guest", "-pass", "guest" ]
     ports:
       - "4223:4222"
       - "8223:8222"
@@ -128,7 +127,12 @@ services:
 
 networks:
   app_network:
-    external: false
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.31.240.0/24
+          gateway: 172.31.240.1
 
 volumes:
   db_data:

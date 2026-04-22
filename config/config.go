@@ -9,19 +9,20 @@ import (
 type (
 	// Config -.
 	Config struct {
-		App         App
-		HTTP        HTTP
-		Log         Log
-		PG          PG
-		GRPC        GRPC
-		RMQ         RMQ
-		NATS        NATS
-		Metrics     Metrics
-		Swagger     Swagger
-		Reservation Reservation
-		GameBackend GameBackend
-		Retry       Retry
-		Tracing     Tracing
+		App               App
+		HTTP              HTTP
+		Log               Log
+		PG                PG
+		GRPC              GRPC
+		RMQ               RMQ
+		NATS              NATS
+		Metrics           Metrics
+		Swagger           Swagger
+		Reservation       Reservation
+		RevealReservation RevealReservation
+		GameBackend       GameBackend
+		Retry             Retry
+		Tracing           Tracing
 	}
 
 	// App -.
@@ -80,6 +81,13 @@ type (
 		TimeoutSeconds         int `env:"RESERVATION_TIMEOUT_SECONDS" envDefault:"60"`
 		MaxPerWallet           int `env:"RESERVATION_MAX_PER_WALLET" envDefault:"3"`
 		CleanupIntervalSeconds int `env:"RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
+	}
+
+	// RevealReservation - Reveal-phase reservation configuration (spec 005-reveal-reservation).
+	RevealReservation struct {
+		TimeoutSeconds         int `env:"REVEAL_RESERVATION_TIMEOUT_SECONDS" envDefault:"90"`
+		MaxPerWallet           int `env:"REVEAL_RESERVATION_MAX_PER_WALLET" envDefault:"5"`
+		CleanupIntervalSeconds int `env:"REVEAL_RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
 	}
 
 	// GameBackend - Game backend specific configuration

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Integration test runner with Docker Compose (T132)
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -18,12 +18,33 @@ NC='\033[0m' # No Color
 # Configuration
 COMPOSE_FILE="$SCRIPT_DIR/testdata/docker-compose.test.yaml"
 TEST_TIMEOUT="5m"
+TEST_PG_HOST_PORT="${TEST_PG_HOST_PORT:-15433}"
+TEST_TON_CENTER_HOST_PORT="${TEST_TON_CENTER_HOST_PORT:-18082}"
+TEST_BACKEND_HOST_PORT="${TEST_BACKEND_HOST_PORT:-13001}"
+
+COMPOSE_CMD=()
+
+detect_compose_cmd() {
+    if docker compose version > /dev/null 2>&1; then
+        COMPOSE_CMD=(docker compose)
+        return 0
+    fi
+
+    if command -v docker-compose > /dev/null 2>&1; then
+        COMPOSE_CMD=(docker-compose)
+        return 0
+    fi
+
+    return 1
+}
 
 # Function to cleanup
 cleanup() {
     echo -e "\n${YELLOW}Cleaning up...${NC}"
     cd "$PROJECT_ROOT"
-    docker-compose -f "$COMPOSE_FILE" down -v
+    if [ ${#COMPOSE_CMD[@]} -gt 0 ]; then
+        "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" down -v
+    fi
     echo -e "${GREEN}Cleanup complete${NC}"
 }
 
@@ -38,15 +59,21 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-if ! command -v docker-compose &> /dev/null; then
-    echo -e "${RED}Error: docker-compose is not installed${NC}"
+if ! detect_compose_cmd; then
+    echo -e "${RED}Error: neither 'docker compose' nor 'docker-compose' is available${NC}"
     exit 1
 fi
+
+echo -e "${GREEN}Using compose command:${NC} ${COMPOSE_CMD[*]}"
+
+export TEST_PG_HOST_PORT
+export TEST_TON_CENTER_HOST_PORT
+export TEST_BACKEND_HOST_PORT
 
 # Start test environment
 echo -e "\n${YELLOW}Starting test environment...${NC}"
 cd "$PROJECT_ROOT"
-docker-compose -f "$COMPOSE_FILE" up -d postgres-test mock-toncenter
+"${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" up -d postgres-test mock-toncenter
 
 # Wait for services to be healthy
 echo -e "${YELLOW}Waiting for services to be ready...${NC}"
@@ -54,7 +81,7 @@ sleep 5
 
 # Check PostgreSQL
 echo -n "PostgreSQL: "
-if docker-compose -f "$COMPOSE_FILE" exec -T postgres-test pg_isready -U postgres > /dev/null 2>&1; then
+if "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" exec -T postgres-test pg_isready -U postgres > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗ Failed${NC}"
@@ -63,56 +90,44 @@ fi
 
 # Check Mock TON Center
 echo -n "Mock TON Center: "
-if curl -f http://localhost:8082/health > /dev/null 2>&1; then
+if curl -f "http://localhost:${TEST_TON_CENTER_HOST_PORT}/health" > /dev/null 2>&1; then
     echo -e "${GREEN}✓${NC}"
 else
     echo -e "${RED}✗ Failed${NC}"
     exit 1
 fi
 
-# Run database migrations
-echo -e "\n${YELLOW}Running database migrations...${NC}"
-export TEST_PG_URL="postgresql://postgres:postgres@localhost:5433/pod_game_test?sslmode=disable"
+# Prepare database schema
+echo -e "\n${YELLOW}Preparing database schema...${NC}"
+export TEST_PG_URL="postgresql://postgres:postgres@localhost:${TEST_PG_HOST_PORT}/pod_game_test?sslmode=disable"
+export PG_URL="$TEST_PG_URL"
+export TEST_TON_CENTER_URL="http://localhost:${TEST_TON_CENTER_HOST_PORT}"
+export TON_CENTER_V2_URL="${TEST_TON_CENTER_URL}/api/v2"
 
-if command -v migrate &> /dev/null; then
+schema_initialized="$(${COMPOSE_CMD[@]} -f "$COMPOSE_FILE" exec -T postgres-test psql -U postgres -d pod_game_test -Atqc "SELECT CASE WHEN to_regclass('public.users') IS NOT NULL THEN 'yes' ELSE 'no' END")"
+
+if [ "$schema_initialized" = "yes" ]; then
+    echo -e "${GREEN}Schema already initialized via docker-entrypoint-initdb.d${NC}"
+elif command -v migrate &> /dev/null; then
     migrate -path "$PROJECT_ROOT/migrations" -database "$TEST_PG_URL" up
     echo -e "${GREEN}Migrations applied${NC}"
 else
-    echo -e "${YELLOW}Warning: migrate not found, assuming database is already migrated${NC}"
+    echo -e "${RED}Error: database schema is not initialized and 'migrate' is unavailable${NC}"
+    exit 1
 fi
 
 # Run integration tests
 echo -e "\n${YELLOW}Running integration tests...${NC}"
 cd "$PROJECT_ROOT"
 
-# Set environment variables for tests
-export TEST_PG_URL="postgresql://postgres:postgres@localhost:5433/pod_game_test?sslmode=disable"
-export TEST_TON_CENTER_URL="http://localhost:8082"
-
 # Run tests with coverage
 TEST_RESULTS=0
 
-echo -e "\n${YELLOW}[1/3] Running blockchain integration tests...${NC}"
-if go test -v -timeout "$TEST_TIMEOUT" ./tests/integration/blockchain_test.go ./tests/integration/helper.go; then
-    echo -e "${GREEN}✓ Blockchain tests passed${NC}"
+echo -e "\n${YELLOW}[1/1] Running package integration suite against isolated services...${NC}"
+if go test -v -count=1 -timeout "$TEST_TIMEOUT" ./tests/integration/...; then
+    echo -e "${GREEN}✓ Integration tests passed${NC}"
 else
-    echo -e "${RED}✗ Blockchain tests failed${NC}"
-    TEST_RESULTS=1
-fi
-
-echo -e "\n${YELLOW}[2/3] Running API integration tests...${NC}"
-if go test -v -timeout "$TEST_TIMEOUT" ./tests/integration/api_test.go ./tests/integration/helper.go; then
-    echo -e "${GREEN}✓ API tests passed${NC}"
-else
-    echo -e "${RED}✗ API tests failed${NC}"
-    TEST_RESULTS=1
-fi
-
-echo -e "\n${YELLOW}[3/3] Running WebSocket integration tests...${NC}"
-if go test -v -timeout "$TEST_TIMEOUT" ./tests/integration/websocket_test.go ./tests/integration/helper.go; then
-    echo -e "${GREEN}✓ WebSocket tests passed${NC}"
-else
-    echo -e "${RED}✗ WebSocket tests failed${NC}"
+    echo -e "${RED}✗ Integration tests failed${NC}"
     TEST_RESULTS=1
 fi
 

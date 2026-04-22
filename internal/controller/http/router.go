@@ -26,16 +26,17 @@ import (
 
 // RouterDeps contains all dependencies needed for the router
 type RouterDeps struct {
-	Logger            logger.Interface
-	GameQueryUC       *usecase.GameQueryUseCase
-	ReservationUC     *usecase.ReservationUseCase
-	UserManagementUC  *usecase.UserManagementUseCase
-	BroadcastUC       *usecase.GameBroadcastUseCase
-	TONClient         *toncenter.Client
-	BlockchainHandler *blockchainctrl.TONEventHandler
-	SyncStateRepo     repository.BlockchainSyncStateRepository
-	PG                *postgres.Postgres
-	GameRepo          repository.GameRepository
+	Logger              logger.Interface
+	GameQueryUC         *usecase.GameQueryUseCase
+	ReservationUC       *usecase.ReservationUseCase
+	RevealReservationUC *usecase.RevealReservationUseCase
+	UserManagementUC    *usecase.UserManagementUseCase
+	BroadcastUC         *usecase.GameBroadcastUseCase
+	TONClient           *toncenter.Client
+	BlockchainHandler   *blockchainctrl.TONEventHandler
+	SyncStateRepo       repository.BlockchainSyncStateRepository
+	PG                  *postgres.Postgres
+	GameRepo            repository.GameRepository
 }
 
 // NewRouter creates and configures the HTTP router
@@ -116,6 +117,16 @@ func NewRouter(app *fiber.App, cfg *config.Config, deps RouterDeps) {
 		apiV1Group.Get("/games/:gameId/reservation", reservationHandler.GetReservation)
 		apiV1Group.Delete("/games/:gameId/reserve", reservationHandler.CancelReservation)
 		apiV1Group.Get("/reservations", reservationHandler.ListReservationsByWallet)
+
+		// Reveal-phase reservation endpoints (spec 005-reveal-reservation)
+		if deps.RevealReservationUC != nil {
+			revealHandler := rest.NewRevealReservationHandler(deps.RevealReservationUC, &zerologger)
+			apiV1Group.Post("/games/:gameId/reveal-reserve", revealHandler.ReserveReveal)
+			apiV1Group.Get("/games/:gameId/reveal-reservation", revealHandler.GetRevealReservation)
+			apiV1Group.Delete("/games/:gameId/reveal-reserve", revealHandler.CancelRevealReservation)
+			apiV1Group.Post("/reveal-reserve", revealHandler.ReserveRevealBatch)
+			apiV1Group.Get("/reveal-reservations", revealHandler.ListRevealReservationsByWallet)
+		}
 
 		// User routes (FR-003: User profiles, FR-006: Game history, FR-021: Referral stats)
 		userHandler := rest.NewUserHandler(deps.UserManagementUC, deps.GameQueryUC, zerologger)

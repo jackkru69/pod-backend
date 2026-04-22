@@ -11,9 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"pod-backend/config"
 	httpRouter "pod-backend/internal/controller/http"
 	"pod-backend/internal/entity"
@@ -21,6 +18,10 @@ import (
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestGETGames tests the GET /api/v1/games endpoint
@@ -441,10 +442,13 @@ func cleanupTestDB(t *testing.T) {
 }
 
 func setupTestDatabase(t *testing.T) *testDatabase {
-	// Use environment variable or default to localhost
-	pgURL := os.Getenv("PG_URL")
+	// Prefer the isolated integration-test database when available.
+	pgURL := os.Getenv("TEST_PG_URL")
 	if pgURL == "" {
-		pgURL = "postgres://user:myAwEsOm3pa55%40w0rd@localhost:5433/db?sslmode=disable"
+		pgURL = os.Getenv("PG_URL")
+	}
+	if pgURL == "" {
+		pgURL = "postgresql://postgres:postgres@localhost:15433/pod_game_test?sslmode=disable"
 	}
 
 	pg, err := postgres.New(pgURL, postgres.MaxPoolSize(5))

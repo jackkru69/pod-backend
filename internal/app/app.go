@@ -95,6 +95,16 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	reservationUC := usecase.NewReservationUseCase(gameRepo, gameBroadcastUC, reservationCfg)
 	reservationUC.StartCleanupLoop(context.Background())
 
+	// Initialize reveal-phase reservation use case (spec 005-reveal-reservation)
+	revealReservationCfg := usecase.RevealReservationConfig{
+		MaxPerWallet:           cfg.RevealReservation.MaxPerWallet,
+		TimeoutSeconds:         cfg.RevealReservation.TimeoutSeconds,
+		CleanupIntervalSeconds: cfg.RevealReservation.CleanupIntervalSeconds,
+	}
+	revealReservationUC := usecase.NewRevealReservationUseCase(gameRepo, gameBroadcastUC, revealReservationCfg)
+	revealReservationUC.SetMetrics(metrics.NewRevealReservationMetrics())
+	revealReservationUC.StartCleanupLoop(context.Background())
+
 	// Initialize TON Center client for blockchain monitoring and health checks
 	circuitBreakerTimeout, err := time.ParseDuration(cfg.GameBackend.CircuitBreakerTimeout)
 	if err != nil {
@@ -116,9 +126,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Initialize blockchain persistence use case (T093)
 	gamePersistenceUC := usecase.NewGamePersistenceUseCase(gameRepo, eventRepo, userRepo)
-	gamePersistenceUC.SetTxManager(txManager)              // Enable transactional operations for atomic updates
-	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC) // Wire WebSocket broadcasting
-	gamePersistenceUC.SetReservationUseCase(reservationUC) // Consume reservations once a join lands on-chain
+	gamePersistenceUC.SetTxManager(txManager)                          // Enable transactional operations for atomic updates
+	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC)             // Wire WebSocket broadcasting
+	gamePersistenceUC.SetReservationUseCase(reservationUC)             // Consume reservations once a join lands on-chain
+	gamePersistenceUC.SetRevealReservationUseCase(revealReservationUC) // Release reveal locks on terminal on-chain transitions (spec 005)
 
 	// Initialize blockchain metrics (T097)
 	blockchainMetrics := metrics.NewBlockchainMetrics()
@@ -176,16 +187,17 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 	// Create router dependencies
 	routerDeps := http.RouterDeps{
-		Logger:            l,
-		GameQueryUC:       gameQueryUC,
-		ReservationUC:     reservationUC,
-		UserManagementUC:  userManagementUC,
-		BroadcastUC:       gameBroadcastUC,
-		TONClient:         tonClient,
-		BlockchainHandler: blockchainHandler,
-		SyncStateRepo:     syncStateRepo,
-		PG:                pg,
-		GameRepo:          gameRepo,
+		Logger:              l,
+		GameQueryUC:         gameQueryUC,
+		ReservationUC:       reservationUC,
+		RevealReservationUC: revealReservationUC,
+		UserManagementUC:    userManagementUC,
+		BroadcastUC:         gameBroadcastUC,
+		TONClient:           tonClient,
+		BlockchainHandler:   blockchainHandler,
+		SyncStateRepo:       syncStateRepo,
+		PG:                  pg,
+		GameRepo:            gameRepo,
 	}
 
 	// HTTP Server

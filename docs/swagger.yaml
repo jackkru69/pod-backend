@@ -272,6 +272,51 @@ definitions:
     required:
     - wallet_address
     type: object
+  rest.RevealReservationEnvelope:
+    properties:
+      reservation:
+        $ref: '#/definitions/rest.RevealReservationResponse'
+    type: object
+  rest.RevealReservationListResponse:
+    properties:
+      reservations:
+        items:
+          $ref: '#/definitions/rest.RevealReservationResponse'
+        type: array
+    type: object
+  rest.RevealReservationResponse:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      game_id:
+        type: integer
+      status:
+        type: string
+      wallet_address:
+        type: string
+    type: object
+  rest.RevealReserveBatchRequest:
+    properties:
+      game_ids:
+        items:
+          type: integer
+        minItems: 1
+        type: array
+      wallet_address:
+        type: string
+    required:
+    - game_ids
+    - wallet_address
+    type: object
+  rest.RevealReserveRequest:
+    properties:
+      wallet_address:
+        type: string
+    required:
+    - wallet_address
+    type: object
 host: localhost:8090
 info:
   contact:
@@ -484,6 +529,110 @@ paths:
       summary: Reserve a game
       tags:
       - reservations
+  /api/v1/games/{gameId}/reveal-reservation:
+    get:
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.RevealReservationEnvelope'
+        "204":
+          description: No reveal reservation exists
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get current reveal reservation for a game
+      tags:
+      - reveal-reservations
+  /api/v1/games/{gameId}/reveal-reserve:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Cancellation request with wallet address
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.RevealReserveRequest'
+      responses:
+        "204":
+          description: Cancelled
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Cancel a reveal reservation (holder-only)
+      tags:
+      - reveal-reservations
+    post:
+      consumes:
+      - application/json
+      description: Off-chain advisory lock that prevents two concurrent callers from
+        sending the same OpenBid for the same game.
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Reveal reservation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.RevealReserveRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/rest.RevealReservationEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Reserve the reveal slot for a game
+      tags:
+      - reveal-reservations
   /api/v1/health:
     get:
       description: Returns service health status including database connectivity,
@@ -532,6 +681,67 @@ paths:
       summary: List reservations by wallet
       tags:
       - reservations
+  /api/v1/reveal-reservations:
+    get:
+      parameters:
+      - description: Wallet address
+        in: query
+        name: wallet
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.RevealReservationListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: List active reveal reservations for a wallet
+      tags:
+      - reveal-reservations
+  /api/v1/reveal-reserve:
+    post:
+      consumes:
+      - application/json
+      description: All-or-nothing reservation. Useful for piggyback OpenBid that bundles
+        several game IDs.
+      parameters:
+      - description: Batched reveal reservation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.RevealReserveBatchRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/rest.RevealReservationListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Reserve the reveal slot for a batch of games (atomic)
+      tags:
+      - reveal-reservations
   /api/v1/users/{address}:
     get:
       consumes:
