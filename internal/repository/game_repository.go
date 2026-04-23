@@ -34,6 +34,10 @@ type GameRepository interface {
 	// Returns empty slice if no games found.
 	GetAvailableGames(ctx context.Context) ([]*entity.Game, error)
 
+	// GetByStatuses retrieves games whose status belongs to the provided list.
+	// Returns empty slice when statuses is empty or no rows match.
+	GetByStatuses(ctx context.Context, statuses []int) ([]*entity.Game, error)
+
 	// GetByPlayerAddress retrieves all games where the player participated.
 	// Searches both player_one_address and player_two_address.
 	// Returns empty slice if no games found.
@@ -41,6 +45,10 @@ type GameRepository interface {
 
 	// GetByPlayer is an alias for GetByPlayerAddress for cleaner use case code.
 	GetByPlayer(ctx context.Context, walletAddress string) ([]*entity.Game, error)
+
+	// GetByPlayerAndStatuses retrieves player games filtered by the provided
+	// statuses.
+	GetByPlayerAndStatuses(ctx context.Context, walletAddress string, statuses []int) ([]*entity.Game, error)
 
 	// Update updates an existing game record.
 	// Returns error if game doesn't exist.

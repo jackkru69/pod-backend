@@ -514,15 +514,25 @@ func GetEventTypeForOpcode(opcode uint32) (string, bool) {
 	switch opcode {
 	case OpcodeGameInitializedNotify:
 		return EventTypeGameInitialized, true
+	case OpcodeGameInitializedEvent:
+		return EventTypeGameInitialized, true
 	case OpcodeGameStartedNotify:
+		return EventTypeGameStarted, true
+	case OpcodeGameStartedEvent:
 		return EventTypeGameStarted, true
 	case OpcodeGameFinishedNotify:
 		return EventTypeGameFinished, true
+	case OpcodeGameFinishedEvent:
+		return EventTypeGameFinished, true
 	case OpcodeGameCancelledNotify:
+		return EventTypeGameCancelled, true
+	case OpcodeGameCancelledEvent:
 		return EventTypeGameCancelled, true
 	case OpcodeSecretOpenedNotify:
 		return EventTypeSecretOpened, true
 	case OpcodeDrawNotify:
+		return EventTypeDraw, true
+	case OpcodeDrawEvent:
 		return EventTypeDraw, true
 	case OpcodeInsufficientBalanceNotify:
 		return EventTypeInsufficientBalance, true

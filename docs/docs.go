@@ -88,6 +88,146 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/games/activity/search": {
+            "get": {
+                "description": "Searches queue-oriented activity items by wallet, opponent, or game identifier.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Search activity surfaces",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Search term",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional wallet address",
+                        "name": "wallet",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional queue scope",
+                        "name": "queue",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum number of results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Number of results to skip",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.GameActivitySearchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/activity/{queueKey}": {
+            "get": {
+                "description": "Returns queue-oriented activity items for joinable, my-active, reveal-required, expired-attention, or history views.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Get a player-facing activity queue",
+                "parameters": [
+                    {
+                        "enum": [
+                            "joinable",
+                            "my-active",
+                            "reveal-required",
+                            "expired-attention",
+                            "history"
+                        ],
+                        "type": "string",
+                        "description": "Queue key",
+                        "name": "queueKey",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional wallet address used for player-relative queue classification",
+                        "name": "wallet",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Maximum number of results",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 0,
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Number of results to skip",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.GameActivityQueueResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/games/{gameId}": {
             "get": {
                 "description": "Retrieve detailed information for a specific game by ID",
@@ -132,6 +272,185 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/{gameId}/expired-claim": {
+            "get": {
+                "description": "Returns the current additive expired-follow-up claim for the specified game.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Get expired-follow-up claim",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ExpiredClaimEnvelope"
+                        }
+                    },
+                    "204": {
+                        "description": "No expired-follow-up claim exists"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Creates or resumes an additive expired-follow-up claim for an ended game that still requires attention.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Create expired-follow-up claim",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Expired claim request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.ExpiredClaimRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ExpiredClaimEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Releases the current expired-follow-up claim held by the requesting wallet.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "games"
+                ],
+                "summary": "Release expired-follow-up claim",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Expired claim release request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.ExpiredClaimRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Claim released"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/rest.ErrorResponse"
                         }
@@ -682,6 +1001,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/{address}/activity-summary": {
+            "get": {
+                "description": "Returns the additive queue counts used by the activity shell for the specified wallet.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get queue summary for a wallet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "TON wallet address",
+                        "name": "address",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/entity.PlayerActivitySummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/{address}/history": {
             "get": {
                 "description": "Retrieve paginated list of games where the user participated (as player 1 or player 2)",
@@ -800,6 +1163,75 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "entity.ActionClaim": {
+            "type": "object",
+            "properties": {
+                "claim_type": {
+                    "$ref": "#/definitions/entity.ActionClaimType"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "holder_wallet": {
+                    "type": "string"
+                },
+                "release_reason": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/entity.ActionClaimStatus"
+                }
+            }
+        },
+        "entity.ActionClaimStatus": {
+            "type": "string",
+            "enum": [
+                "active",
+                "released",
+                "expired"
+            ],
+            "x-enum-varnames": [
+                "ActionClaimStatusActive",
+                "ActionClaimStatusReleased",
+                "ActionClaimStatusExpired"
+            ]
+        },
+        "entity.ActionClaimType": {
+            "type": "string",
+            "enum": [
+                "join",
+                "reveal",
+                "expired_follow_up"
+            ],
+            "x-enum-varnames": [
+                "ActionClaimTypeJoin",
+                "ActionClaimTypeReveal",
+                "ActionClaimTypeExpiredFollowUp"
+            ]
+        },
+        "entity.ActivityQueueKey": {
+            "type": "string",
+            "enum": [
+                "joinable",
+                "my-active",
+                "reveal-required",
+                "expired-attention",
+                "history"
+            ],
+            "x-enum-varnames": [
+                "ActivityQueueJoinable",
+                "ActivityQueueMyActive",
+                "ActivityQueueRevealRequired",
+                "ActivityQueueExpiredAttention",
+                "ActivityQueueHistory"
+            ]
+        },
         "entity.Game": {
             "type": "object",
             "properties": {
@@ -883,6 +1315,90 @@ const docTemplate = `{
                 }
             }
         },
+        "entity.PlayerActivityGame": {
+            "type": "object",
+            "properties": {
+                "active_claims": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.ActionClaim"
+                    }
+                },
+                "game": {
+                    "$ref": "#/definitions/entity.Game"
+                },
+                "is_owned_by_player": {
+                    "type": "boolean"
+                },
+                "latest_activity_at": {
+                    "type": "string"
+                },
+                "next_action": {
+                    "$ref": "#/definitions/entity.PlayerActivityNextAction"
+                },
+                "queue_key": {
+                    "$ref": "#/definitions/entity.ActivityQueueKey"
+                },
+                "requires_attention": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "entity.PlayerActivityNextAction": {
+            "type": "string",
+            "enum": [
+                "join",
+                "resume_join",
+                "wait_for_join_window",
+                "wait_for_opponent",
+                "reveal",
+                "resume_reveal",
+                "wait_for_reveal",
+                "review_result",
+                "resume_review_result",
+                "wait_for_review_window",
+                "browse_history"
+            ],
+            "x-enum-varnames": [
+                "ActivityNextActionJoin",
+                "ActivityNextActionResumeJoin",
+                "ActivityNextActionWaitForJoinWindow",
+                "ActivityNextActionWaitForOpponent",
+                "ActivityNextActionReveal",
+                "ActivityNextActionResumeReveal",
+                "ActivityNextActionWaitForReveal",
+                "ActivityNextActionReviewResult",
+                "ActivityNextActionResumeReview",
+                "ActivityNextActionWaitForReview",
+                "ActivityNextActionBrowseHistory"
+            ]
+        },
+        "entity.PlayerActivitySummary": {
+            "type": "object",
+            "properties": {
+                "expired_attention_count": {
+                    "type": "integer"
+                },
+                "history_count": {
+                    "type": "integer"
+                },
+                "joinable_count": {
+                    "type": "integer"
+                },
+                "last_activity_at": {
+                    "type": "string"
+                },
+                "my_active_count": {
+                    "type": "integer"
+                },
+                "reveal_required_count": {
+                    "type": "integer"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
         "entity.ReferralStats": {
             "type": "object",
             "properties": {
@@ -955,6 +1471,109 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "rest.ExpiredClaimEnvelope": {
+            "type": "object",
+            "properties": {
+                "claim": {
+                    "$ref": "#/definitions/rest.ExpiredClaimResponse"
+                }
+            }
+        },
+        "rest.ExpiredClaimRequest": {
+            "type": "object",
+            "required": [
+                "wallet_address"
+            ],
+            "properties": {
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.ExpiredClaimResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.GameActivityQueueResponse": {
+            "type": "object",
+            "properties": {
+                "attention_required": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.PlayerActivityGame"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "queue_key": {
+                    "$ref": "#/definitions/entity.ActivityQueueKey"
+                },
+                "summary": {
+                    "$ref": "#/definitions/entity.PlayerActivitySummary"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "rest.GameActivitySearchResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/entity.PlayerActivityGame"
+                    }
+                },
+                "limit": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "offset": {
+                    "type": "integer"
+                },
+                "query": {
+                    "type": "string"
+                },
+                "queue_scope": {
+                    "type": "string"
+                },
+                "summary": {
+                    "$ref": "#/definitions/entity.PlayerActivitySummary"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },

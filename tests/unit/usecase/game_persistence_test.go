@@ -13,6 +13,11 @@ import (
 	"pod-backend/internal/usecase"
 )
 
+const (
+	activityTestOtherPlayerWallet = "EQAnotherPlayerWalletAddress123456789012345678"
+	activityTestInitTxHash        = "tx_init_123"
+)
+
 // TestHandleGameInitialized_Success tests successful game creation from blockchain event
 func TestHandleGameInitialized_Success(t *testing.T) {
 	mockGameRepo := new(MockGameRepository)
@@ -24,25 +29,25 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
 		GameID:          123,
-		TransactionHash: "tx_init_123",
+		TransactionHash: activityTestInitTxHash,
 		BlockNumber:     1000,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
 			"game_id":           int64(123),
-			"player_one":        "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			"player_one":        activityTestWallet,
 			"bet_amount":        int64(1000000000), // 1 TON
 			"player_one_choice": int64(1),          // CLOSED
 		},
 	}
 
 	// Expect user to be ensured for FK constraint
-	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, activityTestWallet).Return(nil)
 
 	// Expect game to be created with status WAITING_FOR_OPPONENT (1) - called FIRST
 	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.MatchedBy(func(g *entity.Game) bool {
 		return g.GameID == 123 &&
 			g.Status == entity.GameStatusWaitingForOpponent &&
-			g.PlayerOneAddress == "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2" &&
+			g.PlayerOneAddress == activityTestWallet &&
 			g.BetAmount == 1000000000 &&
 			g.PlayerOneChoice == 1
 	})).Return(true, nil)
@@ -94,19 +99,19 @@ func TestHandleGameInitialized_RepositoryError(t *testing.T) {
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
 		GameID:          123,
-		TransactionHash: "tx_init_123",
+		TransactionHash: activityTestInitTxHash,
 		BlockNumber:     1000,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
 			"game_id":           int64(123),
-			"player_one":        "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			"player_one":        activityTestWallet,
 			"bet_amount":        int64(1000000000),
 			"player_one_choice": int64(1),
 		},
 	}
 
 	// Expect user to be ensured for FK constraint
-	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, activityTestWallet).Return(nil)
 
 	// Note: HandleGameInitialized creates game FIRST, then upserts event
 	// So if CreateOrIgnore fails, Upsert should not be called
@@ -137,7 +142,7 @@ func TestHandleGameStarted_Success(t *testing.T) {
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
 			"game_id":           int64(123),
-			"player_two":        "EQAnotherPlayerWalletAddress123456789012345678",
+			"player_two":        activityTestOtherPlayerWallet,
 			"player_two_choice": int64(1), // CLOSED
 		},
 	}
@@ -145,19 +150,19 @@ func TestHandleGameStarted_Success(t *testing.T) {
 	// Mock game retrieval (safety check in HandleGameStarted)
 	existingGame := &entity.Game{
 		GameID:           123,
-		PlayerOneAddress: "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		PlayerOneAddress: activityTestWallet,
 		Status:           entity.GameStatusWaitingForOpponent,
 	}
 	mockGameRepo.On("GetByID", mock.Anything, int64(123)).Return(existingGame, nil)
 
 	// Expect user to be ensured for FK constraint
-	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQAnotherPlayerWalletAddress123456789012345678").Return(nil)
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, activityTestOtherPlayerWallet).Return(nil)
 
 	mockEventRepo.On("Upsert", mock.Anything, event).Run(func(args mock.Arguments) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
 	}).Return(nil)
-	mockGameRepo.On("JoinGame", mock.Anything, int64(123), "EQAnotherPlayerWalletAddress123456789012345678", "tx_start_123", event.Timestamp).Return(nil)
+	mockGameRepo.On("JoinGame", mock.Anything, int64(123), activityTestOtherPlayerWallet, "tx_start_123", event.Timestamp).Return(nil)
 
 	err := uc.HandleGameStarted(context.Background(), event)
 
@@ -229,8 +234,8 @@ func TestHandleGameFinished_Success(t *testing.T) {
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
-	winnerAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
-	loserAddress := "EQAnotherPlayerWalletAddress123456789012345678"
+	winnerAddress := activityTestWallet
+	loserAddress := activityTestOtherPlayerWallet
 	loserPtr := loserAddress
 
 	// Mock game retrieval to get player addresses
@@ -284,8 +289,8 @@ func TestHandleDraw_Success(t *testing.T) {
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
-	player1 := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
-	player2 := "EQAnotherPlayerWalletAddress123456789012345678"
+	player1 := activityTestWallet
+	player2 := activityTestOtherPlayerWallet
 	player2Ptr := player2
 
 	existingGame := &entity.Game{
@@ -337,26 +342,26 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 	event := &entity.GameEvent{
 		EventType:       entity.EventTypeGameInitialized,
 		GameID:          123,
-		TransactionHash: "tx_init_123",
+		TransactionHash: activityTestInitTxHash,
 		BlockNumber:     1000,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
 			"game_id":           int64(123),
-			"player_one":        "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			"player_one":        activityTestWallet,
 			"bet_amount":        int64(1000000000),
 			"player_one_choice": int64(1),
 		},
 	}
 
 	// Both calls need EnsureUserByWallet
-	mockUserRepo.On("EnsureUserByWallet", mock.Anything, "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2").Return(nil)
+	mockUserRepo.On("EnsureUserByWallet", mock.Anything, activityTestWallet).Return(nil)
 
 	// First call - should process normally
 	// Order: Create game first, then Upsert event
 	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(true, nil).Once()
 	// Upsert sets event.ID = 1 (via Run) - indicates new event
 	mockEventRepo.On("Upsert", mock.Anything, mock.MatchedBy(func(e *entity.GameEvent) bool {
-		return e.TransactionHash == "tx_init_123"
+		return e.TransactionHash == activityTestInitTxHash
 	})).Run(func(args mock.Arguments) {
 		e := args.Get(1).(*entity.GameEvent)
 		e.ID = 1 // Simulate successful insert
@@ -375,7 +380,7 @@ func TestDuplicateEvent_Idempotent(t *testing.T) {
 	mockGameRepo.On("CreateOrIgnore", mock.Anything, mock.Anything).Return(false, nil).Once()
 	// This time simulate duplicate - set event.ID back to 0 after Upsert mock returns
 	mockEventRepo.On("Upsert", mock.Anything, mock.MatchedBy(func(e *entity.GameEvent) bool {
-		return e.TransactionHash == "tx_init_123"
+		return e.TransactionHash == activityTestInitTxHash
 	})).Run(func(args mock.Arguments) {
 		// Simulate ON CONFLICT DO NOTHING - event.ID stays 0
 		e := args.Get(1).(*entity.GameEvent)
@@ -399,8 +404,8 @@ func TestHandleGameFinished_WithReferrer(t *testing.T) {
 
 	uc := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
 
-	winnerAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
-	loserAddress := "EQAnotherPlayerWalletAddress123456789012345678"
+	winnerAddress := activityTestWallet
+	loserAddress := activityTestOtherPlayerWallet
 	referrerAddress := "EQReferrerWalletAddress123456789012345678901234"
 	loserPtr := loserAddress
 	referrerPtr := referrerAddress

@@ -18,8 +18,10 @@ type (
 		NATS              NATS
 		Metrics           Metrics
 		Swagger           Swagger
+		Activity          Activity
 		Reservation       Reservation
 		RevealReservation RevealReservation
+		ExpiredClaim      ExpiredClaim
 		GameBackend       GameBackend
 		Retry             Retry
 		Tracing           Tracing
@@ -76,6 +78,12 @@ type (
 		Enabled bool `env:"SWAGGER_ENABLED" envDefault:"false"`
 	}
 
+	// Activity - queue-oriented activity shell configuration.
+	Activity struct {
+		DefaultLimit int `env:"ACTIVITY_DEFAULT_LIMIT" envDefault:"20"`
+		MaxLimit     int `env:"ACTIVITY_MAX_LIMIT" envDefault:"100"`
+	}
+
 	// Reservation - Game reservation configuration
 	Reservation struct {
 		TimeoutSeconds         int `env:"RESERVATION_TIMEOUT_SECONDS" envDefault:"60"`
@@ -88,6 +96,13 @@ type (
 		TimeoutSeconds         int `env:"REVEAL_RESERVATION_TIMEOUT_SECONDS" envDefault:"90"`
 		MaxPerWallet           int `env:"REVEAL_RESERVATION_MAX_PER_WALLET" envDefault:"5"`
 		CleanupIntervalSeconds int `env:"REVEAL_RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
+	}
+
+	// ExpiredClaim - Expired follow-up claim configuration.
+	ExpiredClaim struct {
+		TimeoutSeconds         int `env:"EXPIRED_CLAIM_TIMEOUT_SECONDS" envDefault:"120"`
+		MaxPerWallet           int `env:"EXPIRED_CLAIM_MAX_PER_WALLET" envDefault:"5"`
+		CleanupIntervalSeconds int `env:"EXPIRED_CLAIM_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
 	}
 
 	// GameBackend - Game backend specific configuration

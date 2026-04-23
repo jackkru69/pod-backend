@@ -208,6 +208,75 @@ func (b *TestMessageBuilder) BuildInsufficientBalanceNotify(gameID int64, requir
 	return base64.StdEncoding.EncodeToString(boc)
 }
 
+// BuildGameInitializedEvent creates a BOC-encoded factory-emitted GameInitializedEvent message.
+func (b *TestMessageBuilder) BuildGameInitializedEvent(gameID int64, playerOne string, bidValue int64, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeGameInitializedEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreAddr(b.parseOrDefaultAddress(playerOne))
+	builder.MustStoreBigCoins(big.NewInt(bidValue))
+	builder.MustStoreUInt(uint64(timestamp), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
+// BuildGameStartedEvent creates a BOC-encoded factory-emitted GameStartedEvent message.
+func (b *TestMessageBuilder) BuildGameStartedEvent(gameID int64, playerOne, playerTwo string, totalGainings int64, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeGameStartedEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreAddr(b.parseOrDefaultAddress(playerOne))
+	builder.MustStoreAddr(b.parseOrDefaultAddress(playerTwo))
+	builder.MustStoreBigCoins(big.NewInt(totalGainings))
+	builder.MustStoreUInt(uint64(timestamp), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
+// BuildGameFinishedEvent creates a BOC-encoded factory-emitted GameFinishedEvent message.
+func (b *TestMessageBuilder) BuildGameFinishedEvent(gameID int64, winner, looser string, totalGainings int64, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeGameFinishedEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreAddr(b.parseOrDefaultAddress(winner))
+	builder.MustStoreAddr(b.parseOrDefaultAddress(looser))
+	builder.MustStoreBigCoins(big.NewInt(totalGainings))
+	builder.MustStoreUInt(uint64(timestamp), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
+// BuildGameCancelledEvent creates a BOC-encoded factory-emitted GameCancelledEvent message.
+func (b *TestMessageBuilder) BuildGameCancelledEvent(gameID int64, playerOne string, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeGameCancelledEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreAddr(b.parseOrDefaultAddress(playerOne))
+	builder.MustStoreUInt(uint64(timestamp), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
+// BuildDrawEvent creates a BOC-encoded factory-emitted DrawEvent message.
+func (b *TestMessageBuilder) BuildDrawEvent(gameID int64, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeDrawEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreUInt(uint64(timestamp), 32)
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
 // BuildOpcodeOnlyMessage creates a BOC-encoded message containing only an opcode.
 // Useful for testing unsupported or truncated payload handling.
 func (b *TestMessageBuilder) BuildOpcodeOnlyMessage(opcode uint32) string {

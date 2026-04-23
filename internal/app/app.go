@@ -105,6 +105,20 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	revealReservationUC.SetMetrics(metrics.NewRevealReservationMetrics())
 	revealReservationUC.StartCleanupLoop(context.Background())
 
+	expiredClaimCfg := usecase.ExpiredClaimConfig{
+		MaxPerWallet:           cfg.ExpiredClaim.MaxPerWallet,
+		TimeoutSeconds:         cfg.ExpiredClaim.TimeoutSeconds,
+		CleanupIntervalSeconds: cfg.ExpiredClaim.CleanupIntervalSeconds,
+	}
+	expiredClaimUC := usecase.NewExpiredClaimUseCase(gameRepo, gameBroadcastUC, expiredClaimCfg)
+	expiredClaimUC.SetMetrics(metrics.NewExpiredClaimMetrics())
+	expiredClaimUC.StartCleanupLoop(context.Background())
+
+	gameActivityUC := usecase.NewGameActivityUseCase(gameRepo, reservationUC, revealReservationUC, expiredClaimUC, usecase.GameActivityConfig{
+		DefaultLimit: cfg.Activity.DefaultLimit,
+		MaxLimit:     cfg.Activity.MaxLimit,
+	})
+
 	// Initialize TON Center client for blockchain monitoring and health checks
 	circuitBreakerTimeout, err := time.ParseDuration(cfg.GameBackend.CircuitBreakerTimeout)
 	if err != nil {
@@ -130,6 +144,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC)             // Wire WebSocket broadcasting
 	gamePersistenceUC.SetReservationUseCase(reservationUC)             // Consume reservations once a join lands on-chain
 	gamePersistenceUC.SetRevealReservationUseCase(revealReservationUC) // Release reveal locks on terminal on-chain transitions (spec 005)
+	gamePersistenceUC.SetExpiredClaimUseCase(expiredClaimUC)           // Release expired follow-up claims once the game leaves ended state
 
 	// Initialize blockchain metrics (T097)
 	blockchainMetrics := metrics.NewBlockchainMetrics()
@@ -155,6 +170,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 
 		if err := syncStateRepo.PersistCheckpoint(
 			ctx,
+			cfg.GameBackend.TONGameContractAddr,
 			checkpoint.LastProcessedLt,
 			sourceType,
 			checkpoint.EventSourceConnected,
@@ -189,8 +205,10 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	routerDeps := http.RouterDeps{
 		Logger:              l,
 		GameQueryUC:         gameQueryUC,
+		GameActivityUC:      gameActivityUC,
 		ReservationUC:       reservationUC,
 		RevealReservationUC: revealReservationUC,
+		ExpiredClaimUC:      expiredClaimUC,
 		UserManagementUC:    userManagementUC,
 		BroadcastUC:         gameBroadcastUC,
 		TONClient:           tonClient,

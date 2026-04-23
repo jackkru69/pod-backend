@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 // TestCreateOrUpdateUser_Success tests successful user creation
@@ -21,7 +22,7 @@ func TestCreateOrUpdateUser_Success(t *testing.T) {
 	user := &entity.User{
 		TelegramUserID:   &telegramID,
 		TelegramUsername: "testuser",
-		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		WalletAddress:    activityTestWallet,
 	}
 
 	mockRepo.On("CreateOrUpdate", mock.Anything, user).Return(nil)
@@ -41,7 +42,7 @@ func TestCreateOrUpdateUser_RepositoryError(t *testing.T) {
 	user := &entity.User{
 		TelegramUserID:   &telegramID,
 		TelegramUsername: "testuser",
-		WalletAddress:    "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		WalletAddress:    activityTestWallet,
 	}
 
 	expectedError := errors.New("database connection failed")
@@ -59,7 +60,7 @@ func TestGetUserByWallet_Success(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
-	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	walletAddress := activityTestWallet
 	telegramID := int64(123456789)
 	expectedUser := &entity.User{
 		ID:               1,
@@ -86,7 +87,7 @@ func TestGetUserByWallet_NotFound(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
-	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	walletAddress := activityTestWallet
 	mockRepo.On("GetByWallet", mock.Anything, walletAddress).Return(nil, errors.New("user not found"))
 
 	user, err := uc.GetUserByWallet(context.Background(), walletAddress)
@@ -96,12 +97,24 @@ func TestGetUserByWallet_NotFound(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
+// TestGetUserByWallet_EmptyWallet tests empty wallet validation
+func TestGetUserByWallet_EmptyWallet(t *testing.T) {
+	mockRepo := new(MockUserRepository)
+	uc := usecase.NewUserManagementUseCase(mockRepo)
+
+	user, err := uc.GetUserByWallet(context.Background(), "")
+
+	assert.Error(t, err)
+	assert.Nil(t, user)
+	assert.Contains(t, err.Error(), "wallet address is required")
+}
+
 // TestGetReferralStats_Success tests successful referral stats retrieval
 func TestGetReferralStats_Success(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
-	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	walletAddress := activityTestWallet
 	expectedStats := &entity.ReferralStats{
 		WalletAddress:         walletAddress,
 		TotalReferrals:        15,
@@ -125,7 +138,7 @@ func TestGetReferralStats_NoReferrals(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
-	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	walletAddress := activityTestWallet
 	expectedStats := &entity.ReferralStats{
 		WalletAddress:         walletAddress,
 		TotalReferrals:        0,
@@ -148,7 +161,7 @@ func TestGetReferralStats_RepositoryError(t *testing.T) {
 	mockRepo := new(MockUserRepository)
 	uc := usecase.NewUserManagementUseCase(mockRepo)
 
-	walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	walletAddress := activityTestWallet
 	expectedError := errors.New("database query failed")
 	mockRepo.On("GetReferralStats", mock.Anything, walletAddress).Return(nil, expectedError)
 
@@ -158,4 +171,16 @@ func TestGetReferralStats_RepositoryError(t *testing.T) {
 	assert.Nil(t, stats)
 	assert.Contains(t, err.Error(), "database query failed")
 	mockRepo.AssertExpectations(t)
+}
+
+// TestGetReferralStats_EmptyWallet tests empty wallet validation
+func TestGetReferralStats_EmptyWallet(t *testing.T) {
+	mockRepo := new(MockUserRepository)
+	uc := usecase.NewUserManagementUseCase(mockRepo)
+
+	stats, err := uc.GetReferralStats(context.Background(), "")
+
+	assert.Error(t, err)
+	assert.Nil(t, stats)
+	assert.Contains(t, err.Error(), "wallet address is required")
 }

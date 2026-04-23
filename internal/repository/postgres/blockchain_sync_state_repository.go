@@ -208,10 +208,12 @@ func (r *BlockchainSyncStateRepository) UpdateLastProcessedLt(ctx context.Contex
 // PersistCheckpoint stores the resumable TON checkpoint together with source status.
 func (r *BlockchainSyncStateRepository) PersistCheckpoint(
 	ctx context.Context,
+	contractAddress string,
 	lt string,
 	sourceType repository.EventSourceType,
 	connected bool,
 ) error {
+	contractAddress = strings.TrimSpace(contractAddress)
 	if strings.TrimSpace(lt) == "" {
 		lt = "0"
 	}
@@ -224,11 +226,14 @@ func (r *BlockchainSyncStateRepository) PersistCheckpoint(
 	const query = `
 		UPDATE blockchain_sync_state
 		SET
+			contract_address = $5::varchar,
 			last_processed_lt = CASE
+				WHEN COALESCE(contract_address, '') <> $5::varchar THEN $1::varchar
 				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $1::varchar
 				ELSE COALESCE(NULLIF(last_processed_lt, ''), '0')
 			END,
 			last_poll_timestamp = CASE
+				WHEN COALESCE(contract_address, '') <> $5::varchar THEN $2
 				WHEN COALESCE(NULLIF(last_processed_lt, ''), '0')::numeric <= $1::numeric THEN $2
 				ELSE last_poll_timestamp
 			END,
@@ -237,7 +242,7 @@ func (r *BlockchainSyncStateRepository) PersistCheckpoint(
 		WHERE id = 1
 	`
 
-	_, err := r.pg.Pool.Exec(ctx, query, lt, now, string(sourceType), connected)
+	_, err := r.pg.Pool.Exec(ctx, query, lt, now, string(sourceType), connected, contractAddress)
 	if err != nil {
 		return fmt.Errorf("execute query: %w", err)
 	}

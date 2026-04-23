@@ -3,8 +3,11 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/Masterminds/squirrel"
+	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
 	"pod-backend/pkg/postgres"
@@ -238,8 +241,12 @@ func (r *GameRepository) GetAvailableGames(ctx context.Context) ([]*entity.Game,
 	return r.GetByStatus(ctx, entity.GameStatusWaitingForOpponent)
 }
 
-// GetByPlayerAddress retrieves all games where the player participated.
-func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress string) ([]*entity.Game, error) {
+// GetByStatuses retrieves all games with one of the provided statuses.
+func (r *GameRepository) GetByStatuses(ctx context.Context, statuses []int) ([]*entity.Game, error) {
+	if len(statuses) == 0 {
+		return []*entity.Game{}, nil
+	}
+
 	sql, args, err := r.pg.Builder.
 		Select(
 			"game_id", "status", "player_one_address", "player_two_address",
@@ -251,7 +258,35 @@ func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress s
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
 		From("games").
-		Where("player_one_address = ? OR player_two_address = ?", walletAddress, walletAddress).
+		Where(squirrel.Eq{"status": statuses}).
+		OrderBy("created_at DESC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	return r.queryGames(ctx, sql, args...)
+}
+
+// GetByPlayerAddress retrieves all games where the player participated.
+func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress string) ([]*entity.Game, error) {
+	playerAddressPredicate, ok := buildPlayerAddressPredicate(walletAddress)
+	if !ok {
+		return []*entity.Game{}, nil
+	}
+
+	sql, args, err := r.pg.Builder.
+		Select(
+			"game_id", "status", "player_one_address", "player_two_address",
+			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
+			"bet_amount", "winner_address", "payout_amount",
+			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
+			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"created_at", "joined_at", "revealed_at", "completed_at",
+			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
+		).
+		From("games").
+		Where(playerAddressPredicate).
 		OrderBy("created_at DESC").
 		ToSql()
 	if err != nil {
@@ -264,6 +299,91 @@ func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress s
 // GetByPlayer is an alias for GetByPlayerAddress for cleaner use case code.
 func (r *GameRepository) GetByPlayer(ctx context.Context, walletAddress string) ([]*entity.Game, error) {
 	return r.GetByPlayerAddress(ctx, walletAddress)
+}
+
+// GetByPlayerAndStatuses retrieves player games filtered by statuses.
+func (r *GameRepository) GetByPlayerAndStatuses(ctx context.Context, walletAddress string, statuses []int) ([]*entity.Game, error) {
+	if len(statuses) == 0 {
+		return []*entity.Game{}, nil
+	}
+
+	playerAddressPredicate, ok := buildPlayerAddressPredicate(walletAddress)
+	if !ok {
+		return []*entity.Game{}, nil
+	}
+
+	sql, args, err := r.pg.Builder.
+		Select(
+			"game_id", "status", "player_one_address", "player_two_address",
+			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
+			"bet_amount", "winner_address", "payout_amount",
+			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
+			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"created_at", "joined_at", "revealed_at", "completed_at",
+			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
+		).
+		From("games").
+		Where(playerAddressPredicate).
+		Where(squirrel.Eq{"status": statuses}).
+		OrderBy("created_at DESC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	return r.queryGames(ctx, sql, args...)
+}
+
+func buildPlayerAddressPredicate(walletAddress string) (squirrel.Or, bool) {
+	walletAddressVariants := buildWalletAddressVariants(walletAddress)
+	if len(walletAddressVariants) == 0 {
+		return squirrel.Or{}, false
+	}
+
+	return squirrel.Or{
+		squirrel.Eq{"player_one_address": walletAddressVariants},
+		squirrel.Eq{"player_two_address": walletAddressVariants},
+	}, true
+}
+
+func buildWalletAddressVariants(walletAddress string) []string {
+	trimmedWalletAddress := strings.TrimSpace(walletAddress)
+	if trimmedWalletAddress == "" {
+		return nil
+	}
+
+	variants := make([]string, 0, 7)
+	seen := make(map[string]struct{}, 7)
+	appendVariant := func(candidate string) {
+		trimmedCandidate := strings.TrimSpace(candidate)
+		if trimmedCandidate == "" {
+			return
+		}
+		if _, exists := seen[trimmedCandidate]; exists {
+			return
+		}
+		seen[trimmedCandidate] = struct{}{}
+		variants = append(variants, trimmedCandidate)
+	}
+
+	appendVariant(trimmedWalletAddress)
+
+	parsedWalletAddress, err := address.ParseAddr(trimmedWalletAddress)
+	if err != nil {
+		parsedWalletAddress, err = address.ParseRawAddr(trimmedWalletAddress)
+		if err != nil {
+			return variants
+		}
+	}
+
+	appendVariant(parsedWalletAddress.StringRaw())
+	appendVariant(parsedWalletAddress.String())
+	appendVariant(parsedWalletAddress.Copy().Testnet(false).Bounce(true).String())
+	appendVariant(parsedWalletAddress.Copy().Testnet(false).Bounce(false).String())
+	appendVariant(parsedWalletAddress.Copy().Testnet(true).Bounce(true).String())
+	appendVariant(parsedWalletAddress.Copy().Testnet(true).Bounce(false).String())
+
+	return variants
 }
 
 // queryGames is a helper to execute queries returning multiple games.

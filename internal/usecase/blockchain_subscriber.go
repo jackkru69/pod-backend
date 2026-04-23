@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -25,9 +26,15 @@ const (
 )
 
 var (
-	errTransactionHasNoInMsg = errors.New("transaction has no in_msg data")
-	errUnknownEventType      = errors.New("unknown event type")
+	errTransactionHasNoInMsg      = errors.New("transaction has no in_msg data")
+	errTransactionHasNoGameEvents = errors.New("transaction has no parsable game event messages")
+	errUnknownEventType           = errors.New("unknown event type")
 )
+
+type transactionMessageCandidate struct {
+	label   string
+	payload json.RawMessage
+}
 
 // RetryConfig holds retry/backoff configuration parameters.
 // Can be set via SetRetryConfig or uses defaults.
@@ -250,20 +257,14 @@ func (uc *BlockchainSubscriberUseCase) HandleTransaction(ctx context.Context, tx
 // single authoritative parser path.
 // T096: Logs WARN for validation failures.
 func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction) (*entity.GameEvent, error) {
-	// Check if in_msg exists and is not null
-	if len(tx.InMsg) == 0 || string(tx.InMsg) == "null" {
-		// This is a normal blockchain transaction without game event data
-		return nil, errTransactionHasNoInMsg
-	}
-
 	parser := uc.parser
 	if parser == nil {
 		parser = toncenter.NewRuntimeMessageParser()
 	}
 
-	parsedMsg, err := parser.ParseInMsg(tx.InMsg)
+	parsedMsg, err := parseTransactionMessage(parser, tx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse TON message: %w", err)
+		return nil, err
 	}
 
 	// Build event data map from parsed message for persistence
@@ -325,6 +326,86 @@ func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction
 	}
 
 	return event, nil
+}
+
+func parseTransactionMessage(parser toncenter.InMsgParser, tx toncenter.Transaction) (*toncenter.ParsedMessage, error) {
+	candidates, err := collectTransactionMessages(tx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse TON message envelope: %w", err)
+	}
+	if len(candidates) == 0 {
+		return nil, errTransactionHasNoGameEvents
+	}
+
+	var firstParseErr error
+	for _, candidate := range candidates {
+		parsedMsg, err := parser.ParseInMsg(candidate.payload)
+		if err == nil {
+			return parsedMsg, nil
+		}
+
+		if isIgnorableMessageParseError(err) {
+			continue
+		}
+
+		if firstParseErr == nil {
+			firstParseErr = fmt.Errorf("%s: %w", candidate.label, err)
+		}
+	}
+
+	if firstParseErr != nil {
+		return nil, fmt.Errorf("failed to parse TON message: %w", firstParseErr)
+	}
+
+	return nil, errTransactionHasNoGameEvents
+}
+
+func collectTransactionMessages(tx toncenter.Transaction) ([]transactionMessageCandidate, error) {
+	var candidates []transactionMessageCandidate
+
+	if hasTransactionMessage(tx.InMsg) {
+		candidates = append(candidates, transactionMessageCandidate{
+			label:   "in_msg",
+			payload: tx.InMsg,
+		})
+	}
+
+	if hasTransactionMessage(tx.OutMsgs) {
+		var outMsgs []json.RawMessage
+		if err := json.Unmarshal(tx.OutMsgs, &outMsgs); err != nil {
+			return nil, fmt.Errorf("decode out_msgs: %w", err)
+		}
+
+		for index, outMsg := range outMsgs {
+			if !hasTransactionMessage(outMsg) {
+				continue
+			}
+
+			candidates = append(candidates, transactionMessageCandidate{
+				label:   fmt.Sprintf("out_msgs[%d]", index),
+				payload: outMsg,
+			})
+		}
+	}
+
+	return candidates, nil
+}
+
+func hasTransactionMessage(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return trimmed != "" && trimmed != "null"
+}
+
+func isIgnorableMessageParseError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	message := err.Error()
+	return strings.Contains(message, "unknown opcode") ||
+		strings.Contains(message, "no message body found in in_msg") ||
+		strings.Contains(message, "empty in_msg") ||
+		strings.Contains(message, "message too short")
 }
 
 // routeEventWithRetry routes a parsed GameEvent with retry logic and exponential backoff.
@@ -517,6 +598,10 @@ func classifyParseError(err error) (entity.DLQErrorType, bool) {
 	message := err.Error()
 	switch {
 	case errors.Is(err, errTransactionHasNoInMsg), strings.Contains(message, errTransactionHasNoInMsg.Error()):
+		return "", false
+	case errors.Is(err, errTransactionHasNoGameEvents), strings.Contains(message, errTransactionHasNoGameEvents.Error()):
+		return "", false
+	case strings.Contains(message, "unknown opcode"):
 		return "", false
 	case strings.Contains(message, "event validation failed"):
 		return entity.DLQErrorTypeValidation, true

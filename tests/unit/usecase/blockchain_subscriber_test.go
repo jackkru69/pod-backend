@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/toncenter"
 	"pod-backend/internal/repository"
@@ -716,6 +717,117 @@ func TestBlockchainSubscriberUseCase_HandleTransaction_ParseFailureDLQDuplicateO
 	assert.NotNil(t, snapshot.LastDLQStoredAt)
 
 	mockDLQRepo.AssertExpectations(t)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_UsesOutMsgEventWhenInMsgIsUnknownOpcode(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockGameRepo := new(MockGameRepository)
+	mockEventRepo := new(MockGameEventRepository)
+	mockUserRepo := new(MockUserRepository)
+
+	persistenceUC := usecase.NewGamePersistenceUseCase(mockGameRepo, mockEventRepo, mockUserRepo)
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, persistenceUC, mockLogger)
+
+	builder := toncenter.NewTestMessageBuilder()
+	playerOne := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+	unknownInMsg := builder.BuildOpcodeOnlyMessage(0x0F8125F3)
+	emittedEvent := builder.BuildGameInitializedEvent(42, playerOne, 1000000000, 1717171717)
+
+	tx := toncenter.Transaction{
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Hash: "test_hash_out_msg_event",
+			Lt:   "987654",
+		},
+		Utime: time.Now().Unix(),
+		InMsg: json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "` + playerOne + `",
+			"destination": "` + playerOne + `",
+			"value": "0",
+			"message": "` + unknownInMsg + `"
+		}`),
+		OutMsgs: json.RawMessage(`[
+			{
+				"@type": "raw.message",
+				"source": "` + playerOne + `",
+				"destination": "` + playerOne + `",
+				"value": "0",
+				"message": "` + emittedEvent + `"
+			}
+		]`),
+	}
+
+	mockUserRepo.
+		On("EnsureUserByWallet", mock.Anything, playerOne).
+		Return(nil).
+		Once()
+	mockGameRepo.
+		On("CreateOrIgnore", mock.Anything, mock.MatchedBy(func(game *entity.Game) bool {
+			return game.GameID == 42 && game.PlayerOneAddress == playerOne && game.BetAmount == 1000000000
+		})).
+		Return(true, nil).
+		Once()
+	mockEventRepo.
+		On("Upsert", mock.Anything, mock.MatchedBy(func(event *entity.GameEvent) bool {
+			return event.GameID == 42 && event.EventType == entity.EventTypeGameInitialized && event.TransactionHash == "test_hash_out_msg_event"
+		})).
+		Run(func(args mock.Arguments) {
+			event := args.Get(1).(*entity.GameEvent)
+			event.ID = 1
+		}).
+		Return(nil).
+		Once()
+
+	err := uc.HandleTransaction(context.Background(), tx)
+
+	require.NoError(t, err)
+	mockUserRepo.AssertExpectations(t)
+	mockGameRepo.AssertExpectations(t)
+	mockEventRepo.AssertExpectations(t)
+}
+
+func TestBlockchainSubscriberUseCase_HandleTransaction_UnknownOpcodeSkipsDLQ(t *testing.T) {
+	mockLogger := logger.New("debug")
+	mockSource := newMockEventSource()
+	mockDLQRepo := new(MockDeadLetterQueueRepository)
+
+	dlqUC := usecase.NewDeadLetterQueueUseCase(mockDLQRepo, mockLogger)
+	dlqUC.SetBaseBackoff(time.Millisecond)
+
+	uc := usecase.NewBlockchainSubscriberUseCase(mockSource, nil, mockLogger)
+	uc.SetDeadLetterQueue(dlqUC)
+
+	builder := toncenter.NewTestMessageBuilder()
+	unknownInMsg := builder.BuildOpcodeOnlyMessage(0xE816EA78)
+	tx := toncenter.Transaction{
+		TransactionID: struct {
+			Type string `json:"@type"`
+			Lt   string `json:"lt"`
+			Hash string `json:"hash"`
+		}{
+			Hash: "test_hash_unknown_opcode",
+			Lt:   "654321",
+		},
+		Utime: time.Now().Unix(),
+		InMsg: json.RawMessage(`{
+			"@type": "raw.message",
+			"source": "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			"destination": "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+			"value": "0",
+			"message": "` + unknownInMsg + `"
+		}`),
+	}
+
+	err := uc.HandleTransaction(context.Background(), tx)
+
+	require.NoError(t, err)
+	assert.Equal(t, usecase.BlockchainSubscriberObservability{}, uc.GetObservabilitySnapshot())
+	mockDLQRepo.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
 }
 
 func TestDeadLetterQueueUseCase_GetObservability(t *testing.T) {

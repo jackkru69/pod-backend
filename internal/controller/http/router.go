@@ -28,8 +28,10 @@ import (
 type RouterDeps struct {
 	Logger              logger.Interface
 	GameQueryUC         *usecase.GameQueryUseCase
+	GameActivityUC      *usecase.GameActivityUseCase
 	ReservationUC       *usecase.ReservationUseCase
 	RevealReservationUC *usecase.RevealReservationUseCase
+	ExpiredClaimUC      *usecase.ExpiredClaimUseCase
 	UserManagementUC    *usecase.UserManagementUseCase
 	BroadcastUC         *usecase.GameBroadcastUseCase
 	TONClient           *toncenter.Client
@@ -110,6 +112,16 @@ func NewRouter(app *fiber.App, cfg *config.Config, deps RouterDeps) {
 		gameHandler := rest.NewGameHandler(deps.GameQueryUC, deps.ReservationUC, &zerologger)
 		apiV1Group.Get("/games", gameHandler.ListGames)
 		apiV1Group.Get("/games/:gameId", gameHandler.GetGameByID)
+
+		if deps.GameActivityUC != nil {
+			activityHandler := rest.NewGameActivityHandler(deps.GameActivityUC, deps.ExpiredClaimUC, &zerologger)
+			apiV1Group.Get("/games/activity/search", activityHandler.SearchActivity)
+			apiV1Group.Get("/games/activity/:queueKey", activityHandler.ListQueue)
+			apiV1Group.Get("/users/:address/activity-summary", activityHandler.GetUserActivitySummary)
+			apiV1Group.Post("/games/:gameId/expired-claim", activityHandler.CreateExpiredClaim)
+			apiV1Group.Get("/games/:gameId/expired-claim", activityHandler.GetExpiredClaim)
+			apiV1Group.Delete("/games/:gameId/expired-claim", activityHandler.DeleteExpiredClaim)
+		}
 
 		// Reservation endpoints
 		reservationHandler := rest.NewReservationHandler(deps.ReservationUC, &zerologger)

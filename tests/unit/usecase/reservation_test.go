@@ -102,6 +102,49 @@ func TestReserve_GameAlreadyReserved(t *testing.T) {
 	assert.ErrorIs(t, err, entity.ErrGameAlreadyReserved)
 }
 
+func TestReservation_RecoverySurface_PersistsUntilExplicitRelease(t *testing.T) {
+	ctx := context.Background()
+	mockRepo := new(MockGameRepository)
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+
+	cfg := usecase.ReservationConfig{
+		MaxPerWallet:           3,
+		TimeoutSeconds:         60,
+		CleanupIntervalSeconds: 5,
+	}
+
+	uc := usecase.NewReservationUseCase(mockRepo, broadcastUC, cfg)
+
+	game := &entity.Game{
+		GameID:           321,
+		Status:           entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress: testWallet1,
+		BetAmount:        1000000000,
+	}
+
+	mockRepo.On("GetByID", ctx, int64(321)).Return(game, nil).Times(3)
+
+	created, err := uc.Reserve(ctx, 321, testWallet2)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+
+	_, err = uc.Reserve(ctx, 321, testWallet3)
+	assert.ErrorIs(t, err, entity.ErrGameAlreadyReserved)
+
+	restored, err := uc.GetReservation(ctx, 321)
+	require.NoError(t, err)
+	require.NotNil(t, restored)
+	assert.Equal(t, testWallet2, restored.WalletAddress)
+
+	reservations, err := uc.ListByWallet(ctx, testWallet2)
+	require.NoError(t, err)
+	require.Len(t, reservations, 1)
+	assert.Equal(t, int64(321), reservations[0].GameID)
+	assert.Equal(t, testWallet2, reservations[0].WalletAddress)
+
+	mockRepo.AssertExpectations(t)
+}
+
 // TestReserve_WalletAtLimit tests reservation when wallet has max reservations (T010)
 func TestReserve_WalletAtLimit(t *testing.T) {
 	// Arrange

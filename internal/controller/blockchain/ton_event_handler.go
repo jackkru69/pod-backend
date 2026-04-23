@@ -131,6 +131,13 @@ func NewTONEventHandler(
 
 	if shouldResumeCheckpoint(cfg, checkpoint) {
 		handler.SetLastProcessedLt(checkpoint.LastProcessedLt)
+	} else if checkpoint != nil && strings.TrimSpace(checkpoint.LastProcessedLt) != "" {
+		logger.Info(
+			"Skipping blockchain checkpoint resume: checkpoint contract=%s configured contract=%s last_lt=%s",
+			checkpoint.ContractAddress,
+			cfg.GameBackend.TONGameContractAddr,
+			checkpoint.LastProcessedLt,
+		)
 	}
 
 	return handler, nil
@@ -317,5 +324,7 @@ func resolveInitialEventSourceType(cfg *config.Config, checkpoint *entity.Blockc
 func shouldResumeCheckpoint(cfg *config.Config, checkpoint *entity.BlockchainSyncState) bool {
 	return cfg.GameBackend.ResumeFromCheckpoint &&
 		checkpoint != nil &&
-		strings.TrimSpace(checkpoint.LastProcessedLt) != ""
+		strings.TrimSpace(checkpoint.LastProcessedLt) != "" &&
+		strings.TrimSpace(checkpoint.ContractAddress) != "" &&
+		strings.TrimSpace(checkpoint.ContractAddress) == strings.TrimSpace(cfg.GameBackend.TONGameContractAddr)
 }

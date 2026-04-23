@@ -45,6 +45,14 @@ func (m *MockGameRepository) GetAvailableGames(ctx context.Context) ([]*entity.G
 	return args.Get(0).([]*entity.Game), args.Error(1)
 }
 
+func (m *MockGameRepository) GetByStatuses(ctx context.Context, statuses []int) ([]*entity.Game, error) {
+	args := m.Called(ctx, statuses)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.Game), args.Error(1)
+}
+
 func (m *MockGameRepository) GetByPlayerAddress(ctx context.Context, address string) ([]*entity.Game, error) {
 	args := m.Called(ctx, address)
 	if args.Get(0) == nil {
@@ -55,6 +63,14 @@ func (m *MockGameRepository) GetByPlayerAddress(ctx context.Context, address str
 
 func (m *MockGameRepository) GetByPlayer(ctx context.Context, address string) ([]*entity.Game, error) {
 	return m.GetByPlayerAddress(ctx, address)
+}
+
+func (m *MockGameRepository) GetByPlayerAndStatuses(ctx context.Context, address string, statuses []int) ([]*entity.Game, error) {
+	args := m.Called(ctx, address, statuses)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).([]*entity.Game), args.Error(1)
 }
 
 func (m *MockGameRepository) Update(ctx context.Context, game *entity.Game) error {

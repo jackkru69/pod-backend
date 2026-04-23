@@ -47,9 +47,10 @@ type BlockchainSyncStateRepository interface {
 	// This operation must be atomic for TON blockchain event ordering.
 	UpdateLastProcessedLt(ctx context.Context, lt string) error
 
-	// PersistCheckpoint stores the resumable TON checkpoint and current source status.
-	// This keeps restart recovery and health reporting aligned to the same state snapshot.
-	PersistCheckpoint(ctx context.Context, lt string, sourceType EventSourceType, connected bool) error
+	// PersistCheckpoint stores the resumable TON checkpoint together with the active contract address
+	// and current source status. This keeps restart recovery and health reporting aligned to the same
+	// state snapshot even when local environments switch factory addresses.
+	PersistCheckpoint(ctx context.Context, contractAddress, lt string, sourceType EventSourceType, connected bool) error
 
 	// GetLastProcessedLt returns the last processed logical time (lt) (T146).
 	GetLastProcessedLt(ctx context.Context) (string, error)

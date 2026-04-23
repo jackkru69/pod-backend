@@ -25,6 +25,7 @@ and serving operational endpoints such as health checks, metrics, and Swagger.
 ## Backend Responsibilities
 
 - Serve REST API for games, reservations, user profiles, history, and referrals
+- Serve queue-oriented activity, search, activity-summary, and expired-follow-up claim surfaces
 - Serve WebSocket updates for global and per-game subscriptions
 - Subscribe to TON Center events and persist blockchain-derived state
 - Expose health, metrics, and Swagger/OpenAPI surfaces
@@ -179,11 +180,17 @@ If you are running `pod-tma` locally, keep these aligned:
 
 - `GET /api/v1/games`
 - `GET /api/v1/games/:gameId`
+- `GET /api/v1/games/activity/:queueKey`
+- `GET /api/v1/games/activity/search`
+- `POST /api/v1/games/:gameId/expired-claim`
+- `GET /api/v1/games/:gameId/expired-claim`
+- `DELETE /api/v1/games/:gameId/expired-claim`
 - `POST /api/v1/games/:gameId/reserve`
 - `GET /api/v1/games/:gameId/reservation`
 - `DELETE /api/v1/games/:gameId/reserve`
 - `GET /api/v1/reservations`
 - `GET /api/v1/users/:address`
+- `GET /api/v1/users/:address/activity-summary`
 - `GET /api/v1/users/:address/history`
 - `GET /api/v1/users/:address/referrals`
 - `GET /api/v1/health` — overall service health plus parser recovery snapshot
@@ -198,6 +205,8 @@ Server message families:
 - `game_state_update` — emitted by global and per-game subscriptions with a top-level RFC3339 `timestamp`
 - `reservation_created` — emitted when a reservation is acquired
 - `reservation_released` — emitted when a reservation expires, is cancelled, or is consumed by a join
+- `expired_claim_created` — emitted when an unresolved-game follow-up claim is acquired
+- `expired_claim_released` — emitted when an expired claim is cancelled, expires, or is released because the game became resolved
 - `sync_response` — returned only by `/ws/games/:gameId` after a client `sync_request`
 - `error` — returned for invalid JSON, unsupported client frames, or temporarily unavailable sync state
 
@@ -273,6 +282,9 @@ go test ./tests/unit/... -v
 # Integration tests
 go test ./tests/integration/... -v
 
+# Isolated integration runner (authoritative for feature slices)
+./tests/run-integration-tests.sh
+
 # Full test run
 go test ./... -v -race -cover
 
@@ -286,8 +298,10 @@ make mock
 make deps-audit
 ```
 
-Integration tests require a working Postgres database, typically via
-`TEST_PG_URL` or the integration Docker setup.
+Direct integration tests require a working Postgres database, typically via
+`TEST_PG_URL`. For a reproducible feature-slice verification path, prefer
+`./tests/run-integration-tests.sh`, which provisions isolated services with
+Docker Compose and runs the full backend integration suite against them.
 
 ## Migrations
 

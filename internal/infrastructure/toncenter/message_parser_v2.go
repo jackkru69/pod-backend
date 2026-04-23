@@ -174,16 +174,26 @@ func (p *MessageParserV2) parseMessageDataFromSlice(msg *ParsedMessage, slice *c
 	switch opcode {
 	case OpcodeGameInitializedNotifyV2:
 		return p.parseGameInitializedNotifyV2(msg, slice)
+	case OpcodeGameInitializedEvent:
+		return p.parseGameInitializedEventV2(msg, slice)
 	case OpcodeGameStartedNotifyV2:
 		return p.parseGameStartedNotifyV2(msg, slice)
+	case OpcodeGameStartedEvent:
+		return p.parseGameStartedEventV2(msg, slice)
 	case OpcodeGameFinishedNotifyV2:
 		return p.parseGameFinishedNotifyV2(msg, slice)
+	case OpcodeGameFinishedEvent:
+		return p.parseGameFinishedEventV2(msg, slice)
 	case OpcodeGameCancelledNotifyV2:
 		return p.parseGameCancelledNotifyV2(msg, slice)
+	case OpcodeGameCancelledEvent:
+		return p.parseGameCancelledEventV2(msg, slice)
 	case OpcodeSecretOpenedNotifyV2:
 		return p.parseSecretOpenedNotifyV2(msg, slice)
 	case OpcodeDrawNotifyV2:
 		return p.parseDrawNotifyV2(msg, slice)
+	case OpcodeDrawEvent:
+		return p.parseDrawEventV2(msg, slice)
 	case OpcodeInsufficientBalanceNotifyV2:
 		return p.parseInsufficientBalanceNotifyV2(msg, slice)
 	default:
@@ -433,6 +443,86 @@ func (p *MessageParserV2) parseInsufficientBalanceNotifyV2(msg *ParsedMessage, s
 	msg.Actual = actual
 
 	return msg, nil
+}
+
+// parseGameInitializedEventV2 parses the factory-emitted GameInitializedEvent message.
+// Runtime persistence intentionally maps emitted event opcodes onto the same canonical
+// event types as the notify messages so the downstream persistence handlers remain unchanged.
+func (p *MessageParserV2) parseGameInitializedEventV2(msg *ParsedMessage, slice *cell.Slice) (*ParsedMessage, error) {
+	parsedMsg, err := p.parseGameInitializedNotifyV2(msg, slice)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := loadEmittedEventTimestamp(slice, "GameInitializedEvent"); err != nil {
+		return nil, err
+	}
+
+	return parsedMsg, nil
+}
+
+// parseGameStartedEventV2 parses the factory-emitted GameStartedEvent message.
+func (p *MessageParserV2) parseGameStartedEventV2(msg *ParsedMessage, slice *cell.Slice) (*ParsedMessage, error) {
+	parsedMsg, err := p.parseGameStartedNotifyV2(msg, slice)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := loadEmittedEventTimestamp(slice, "GameStartedEvent"); err != nil {
+		return nil, err
+	}
+
+	return parsedMsg, nil
+}
+
+// parseGameFinishedEventV2 parses the factory-emitted GameFinishedEvent message.
+func (p *MessageParserV2) parseGameFinishedEventV2(msg *ParsedMessage, slice *cell.Slice) (*ParsedMessage, error) {
+	parsedMsg, err := p.parseGameFinishedNotifyV2(msg, slice)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := loadEmittedEventTimestamp(slice, "GameFinishedEvent"); err != nil {
+		return nil, err
+	}
+
+	return parsedMsg, nil
+}
+
+// parseGameCancelledEventV2 parses the factory-emitted GameCancelledEvent message.
+func (p *MessageParserV2) parseGameCancelledEventV2(msg *ParsedMessage, slice *cell.Slice) (*ParsedMessage, error) {
+	parsedMsg, err := p.parseGameCancelledNotifyV2(msg, slice)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := loadEmittedEventTimestamp(slice, "GameCancelledEvent"); err != nil {
+		return nil, err
+	}
+
+	return parsedMsg, nil
+}
+
+// parseDrawEventV2 parses the factory-emitted DrawEvent message.
+func (p *MessageParserV2) parseDrawEventV2(msg *ParsedMessage, slice *cell.Slice) (*ParsedMessage, error) {
+	parsedMsg, err := p.parseDrawNotifyV2(msg, slice)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := loadEmittedEventTimestamp(slice, "DrawEvent"); err != nil {
+		return nil, err
+	}
+
+	return parsedMsg, nil
+}
+
+func loadEmittedEventTimestamp(slice *cell.Slice, eventName string) error {
+	if _, err := slice.LoadUInt(32); err != nil {
+		return fmt.Errorf("%s: failed to read timestamp: %w", eventName, err)
+	}
+
+	return nil
 }
 
 // parseLegacyJSON handles the legacy JSON format used in tests.

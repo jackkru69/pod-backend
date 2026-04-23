@@ -276,11 +276,16 @@ func TestGetEventTypeForOpcode(t *testing.T) {
 		shouldExist  bool
 	}{
 		{OpcodeGameInitializedNotify, EventTypeGameInitialized, true},
+		{OpcodeGameInitializedEvent, EventTypeGameInitialized, true},
 		{OpcodeGameStartedNotify, EventTypeGameStarted, true},
+		{OpcodeGameStartedEvent, EventTypeGameStarted, true},
 		{OpcodeGameFinishedNotify, EventTypeGameFinished, true},
+		{OpcodeGameFinishedEvent, EventTypeGameFinished, true},
 		{OpcodeGameCancelledNotify, EventTypeGameCancelled, true},
+		{OpcodeGameCancelledEvent, EventTypeGameCancelled, true},
 		{OpcodeSecretOpenedNotify, EventTypeSecretOpened, true},
 		{OpcodeDrawNotify, EventTypeDraw, true},
+		{OpcodeDrawEvent, EventTypeDraw, true},
 		{OpcodeInsufficientBalanceNotify, EventTypeInsufficientBalance, true},
 		{0x00000000, "", false}, // Unknown opcode
 		{0xFFFFFFFF, "", false}, // Unknown opcode
@@ -468,5 +473,91 @@ func TestMessageParserV2_RoundTrip(t *testing.T) {
 		assert.NotNil(t, msg.Actual)
 		assert.Equal(t, "2000000000", msg.Required.String())
 		assert.Equal(t, "1500000000", msg.Actual.String())
+	})
+
+	t.Run("Factory emitted events round-trip", func(t *testing.T) {
+		timestamp := uint32(1717171717)
+
+		tests := []struct {
+			name          string
+			messageBase64 string
+			expectedType  string
+			gameID        int64
+			assertMsg     func(t *testing.T, msg *ParsedMessage)
+		}{
+			{
+				name:          "GameInitializedEvent",
+				messageBase64: builder.BuildGameInitializedEvent(13579, testAddr1, 1000000000, timestamp),
+				expectedType:  EventTypeGameInitialized,
+				gameID:        13579,
+				assertMsg: func(t *testing.T, msg *ParsedMessage) {
+					t.Helper()
+					assert.Contains(t, msg.PlayerOne, "EQ")
+					assert.NotNil(t, msg.BidValue)
+					assert.Equal(t, "1000000000", msg.BidValue.String())
+				},
+			},
+			{
+				name:          "GameStartedEvent",
+				messageBase64: builder.BuildGameStartedEvent(24680, testAddr1, testAddr2, 2000000000, timestamp),
+				expectedType:  EventTypeGameStarted,
+				gameID:        24680,
+				assertMsg: func(t *testing.T, msg *ParsedMessage) {
+					t.Helper()
+					assert.Contains(t, msg.PlayerOne, "EQ")
+					assert.Contains(t, msg.PlayerTwo, "EQ")
+					assert.NotNil(t, msg.TotalGainings)
+					assert.Equal(t, "2000000000", msg.TotalGainings.String())
+				},
+			},
+			{
+				name:          "GameFinishedEvent",
+				messageBase64: builder.BuildGameFinishedEvent(97531, testAddr1, testAddr2, 1900000000, timestamp),
+				expectedType:  EventTypeGameFinished,
+				gameID:        97531,
+				assertMsg: func(t *testing.T, msg *ParsedMessage) {
+					t.Helper()
+					assert.Contains(t, msg.Winner, "EQ")
+					assert.Contains(t, msg.Looser, "EQ")
+					assert.NotNil(t, msg.TotalGainings)
+					assert.Equal(t, "1900000000", msg.TotalGainings.String())
+				},
+			},
+			{
+				name:          "GameCancelledEvent",
+				messageBase64: builder.BuildGameCancelledEvent(86420, testAddr1, timestamp),
+				expectedType:  EventTypeGameCancelled,
+				gameID:        86420,
+				assertMsg: func(t *testing.T, msg *ParsedMessage) {
+					t.Helper()
+					assert.Contains(t, msg.PlayerOne, "EQ")
+				},
+			},
+			{
+				name:          "DrawEvent",
+				messageBase64: builder.BuildDrawEvent(11223, timestamp),
+				expectedType:  EventTypeDraw,
+				gameID:        11223,
+				assertMsg:     func(t *testing.T, msg *ParsedMessage) {},
+			},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				inMsgJSON := json.RawMessage(`{
+					"@type": "raw.message",
+					"source": "` + testAddr1 + `",
+					"destination": "` + testAddr2 + `",
+					"value": "0",
+					"message": "` + tt.messageBase64 + `"
+				}`)
+
+				msg, err := parser.ParseInMsg(inMsgJSON)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedType, msg.EventType)
+				assert.Equal(t, tt.gameID, msg.GameID)
+				tt.assertMsg(t, msg)
+			})
+		}
 	})
 }

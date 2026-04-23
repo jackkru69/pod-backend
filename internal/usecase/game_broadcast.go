@@ -22,6 +22,8 @@ const (
 	// only; existing event envelopes are unchanged.
 	MessageTypeRevealReservationCreated  = "reveal_reservation_created"
 	MessageTypeRevealReservationReleased = "reveal_reservation_released"
+	MessageTypeExpiredClaimCreated       = "expired_claim_created"
+	MessageTypeExpiredClaimReleased      = "expired_claim_released"
 
 	// GlobalGameID is used for subscribers who want to receive all game updates
 	GlobalGameID = int64(0)
@@ -76,6 +78,23 @@ type RevealReservationReleasedEvent struct {
 	Timestamp string `json:"timestamp"`
 	GameID    int64  `json:"game_id"`
 	Reason    string `json:"reason"` // "expired", "cancelled", "revealed"
+}
+
+// ExpiredClaimCreatedEvent is sent when an expired-follow-up claim is created.
+type ExpiredClaimCreatedEvent struct {
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	GameID     int64  `json:"game_id"`
+	ReservedBy string `json:"reserved_by"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// ExpiredClaimReleasedEvent is sent when an expired-follow-up claim is released.
+type ExpiredClaimReleasedEvent struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	GameID    int64  `json:"game_id"`
+	Reason    string `json:"reason"` // "expired", "cancelled", "resolved"
 }
 
 type GameStateUpdateEvent struct {
@@ -340,6 +359,31 @@ func (uc *GameBroadcastUseCase) BroadcastRevealReservationCreated(ctx context.Co
 func (uc *GameBroadcastUseCase) BroadcastRevealReservationReleased(ctx context.Context, gameID int64, reason string) error {
 	event := RevealReservationReleasedEvent{
 		Type:      MessageTypeRevealReservationReleased,
+		Timestamp: websocketTimestamp(time.Now()),
+		GameID:    gameID,
+		Reason:    reason,
+	}
+
+	return uc.broadcastEvent(ctx, gameID, event)
+}
+
+// BroadcastExpiredClaimCreated sends an expired-follow-up claim created event.
+func (uc *GameBroadcastUseCase) BroadcastExpiredClaimCreated(ctx context.Context, claim *entity.ExpiredClaim) error {
+	event := ExpiredClaimCreatedEvent{
+		Type:       MessageTypeExpiredClaimCreated,
+		Timestamp:  websocketTimestamp(time.Now()),
+		GameID:     claim.GameID,
+		ReservedBy: claim.WalletAddress,
+		ExpiresAt:  claim.ExpiresAt.Format(time.RFC3339),
+	}
+
+	return uc.broadcastEvent(ctx, claim.GameID, event)
+}
+
+// BroadcastExpiredClaimReleased sends an expired-follow-up claim released event.
+func (uc *GameBroadcastUseCase) BroadcastExpiredClaimReleased(ctx context.Context, gameID int64, reason string) error {
+	event := ExpiredClaimReleasedEvent{
+		Type:      MessageTypeExpiredClaimReleased,
 		Timestamp: websocketTimestamp(time.Now()),
 		GameID:    gameID,
 		Reason:    reason,

@@ -23,6 +23,7 @@ type GamePersistenceUseCase struct {
 	broadcastUC     *GameBroadcastUseCase     // Optional: nil when WebSocket not enabled
 	reserveUC       *ReservationUseCase       // Optional: nil when reservation lifecycle is not enabled
 	revealReserveUC *RevealReservationUseCase // Optional: nil when reveal-reservation feature is disabled
+	expiredClaimUC  *ExpiredClaimUseCase      // Optional: nil when expired-follow-up claims are disabled
 }
 
 // NewGamePersistenceUseCase creates a new game persistence use case.
@@ -66,6 +67,11 @@ func (uc *GamePersistenceUseCase) SetRevealReservationUseCase(revealUC *RevealRe
 	uc.revealReserveUC = revealUC
 }
 
+// SetExpiredClaimUseCase wires the expired-follow-up claim use case so status changes that resolve the expired-attention state release advisory claims.
+func (uc *GamePersistenceUseCase) SetExpiredClaimUseCase(expiredClaimUC *ExpiredClaimUseCase) {
+	uc.expiredClaimUC = expiredClaimUC
+}
+
 // releaseRevealReservationIfAny is a small helper called after the DB write of
 // a terminal status has committed. Idempotent.
 func (uc *GamePersistenceUseCase) releaseRevealReservationIfAny(ctx context.Context, gameID int64) {
@@ -73,6 +79,13 @@ func (uc *GamePersistenceUseCase) releaseRevealReservationIfAny(ctx context.Cont
 		return
 	}
 	uc.revealReserveUC.ReleaseOnTerminal(ctx, gameID)
+}
+
+func (uc *GamePersistenceUseCase) releaseExpiredClaimIfResolved(ctx context.Context, gameID int64) {
+	if uc.expiredClaimUC == nil {
+		return
+	}
+	uc.expiredClaimUC.ReleaseOnResolved(ctx, gameID)
 }
 
 // extractInt64 extracts an int64 from event data, handling both int64 and float64 types.
@@ -248,6 +261,7 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 
 	// Broadcast game update to WebSocket subscribers (T093)
 	uc.broadcastGameUpdate(ctx, gameID, GameEventTypeInitialized)
+	uc.releaseExpiredClaimIfResolved(ctx, gameID)
 
 	return nil
 }
@@ -309,6 +323,7 @@ func (uc *GamePersistenceUseCase) HandleGameStarted(ctx context.Context, event *
 
 	// Broadcast game update to WebSocket subscribers (T093)
 	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeStarted)
+	uc.releaseExpiredClaimIfResolved(ctx, event.GameID)
 
 	return nil
 }
@@ -476,6 +491,7 @@ func (uc *GamePersistenceUseCase) HandleGameFinished(ctx context.Context, event 
 		uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeFinished)
 		// Release any reveal-phase reservation now that the game is terminal (spec 005).
 		uc.releaseRevealReservationIfAny(ctx, event.GameID)
+		uc.releaseExpiredClaimIfResolved(ctx, event.GameID)
 	}
 
 	return nil
@@ -543,6 +559,7 @@ func (uc *GamePersistenceUseCase) HandleDraw(ctx context.Context, event *entity.
 
 	// Terminal status: release any reveal-phase reservation (spec 005).
 	uc.releaseRevealReservationIfAny(ctx, event.GameID)
+	uc.releaseExpiredClaimIfResolved(ctx, event.GameID)
 
 	return nil
 }
@@ -646,6 +663,7 @@ func (uc *GamePersistenceUseCase) HandleSecretOpened(ctx context.Context, event 
 
 	// Broadcast game update to WebSocket subscribers (T093)
 	uc.broadcastGameUpdate(ctx, event.GameID, GameEventTypeSecretOpened)
+	uc.releaseExpiredClaimIfResolved(ctx, event.GameID)
 
 	return nil
 }

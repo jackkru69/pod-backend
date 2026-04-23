@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/xssnick/tonutils-go/address"
 )
 
 // TestGETGames tests the GET /api/v1/games endpoint
@@ -405,23 +407,700 @@ func setupTestApp(t *testing.T) *fiber.App {
 		TimeoutSeconds:         60,
 		CleanupIntervalSeconds: 5,
 	})
+	revealReservationUC := usecase.NewRevealReservationUseCase(gameRepo, nil, usecase.RevealReservationConfig{
+		MaxPerWallet:           5,
+		TimeoutSeconds:         90,
+		CleanupIntervalSeconds: 5,
+	})
+	expiredClaimUC := usecase.NewExpiredClaimUseCase(gameRepo, nil, usecase.ExpiredClaimConfig{
+		MaxPerWallet:           5,
+		TimeoutSeconds:         120,
+		CleanupIntervalSeconds: 5,
+	})
+	gameActivityUC := usecase.NewGameActivityUseCase(gameRepo, reservationUC, revealReservationUC, expiredClaimUC, usecase.GameActivityConfig{
+		DefaultLimit: 20,
+		MaxLimit:     100,
+	})
 	userManagementUC := usecase.NewUserManagementUseCase(userRepo)
 
 	// Setup routes with RouterDeps
 	deps := httpRouter.RouterDeps{
-		Logger:            l,
-		GameQueryUC:       gameQueryUC,
-		ReservationUC:     reservationUC,
-		UserManagementUC:  userManagementUC,
-		BroadcastUC:       nil, // Not needed for tests
-		TONClient:         nil, // Not needed for tests
-		BlockchainHandler: nil, // Not needed for tests
-		PG:                testDB.pg,
-		GameRepo:          gameRepo,
+		Logger:              l,
+		GameQueryUC:         gameQueryUC,
+		GameActivityUC:      gameActivityUC,
+		ReservationUC:       reservationUC,
+		RevealReservationUC: revealReservationUC,
+		ExpiredClaimUC:      expiredClaimUC,
+		UserManagementUC:    userManagementUC,
+		BroadcastUC:         nil, // Not needed for tests
+		TONClient:           nil, // Not needed for tests
+		BlockchainHandler:   nil, // Not needed for tests
+		PG:                  testDB.pg,
+		GameRepo:            gameRepo,
 	}
 	httpRouter.NewRouter(app, cfg, deps)
 
 	return app
+}
+
+//nolint:funlen,paralleltest // Uses shared seeded DB fixtures and cohesive end-to-end HTTP assertions for the activity slice.
+func TestGETGameActivityQueue(t *testing.T) {
+	t.Run("should return joinable queue with player-relative summary", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		now := time.Now()
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                401,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      otherWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    walletAddress,
+			InitTxHash:            "activity-401",
+			CreatedAt:             now,
+		})
+		seedGame(t, &entity.Game{
+			GameID:                402,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      walletAddress,
+			PlayerOneChoice:       entity.CoinSideTails,
+			BetAmount:             1200000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "activity-402",
+			CreatedAt:             now.Add(-time.Minute),
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/joinable?wallet=%s", walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(body, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, "joinable", result["queue_key"])
+		assert.Equal(t, float64(1), result["total"])
+
+		summary := result["summary"].(map[string]interface{})
+		assert.Equal(t, float64(1), summary["joinable_count"])
+		assert.Equal(t, float64(1), summary["my_active_count"])
+
+		items := result["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		assert.Equal(t, "join", item["next_action"])
+	})
+
+	t.Run("should match my active queue when wallet is provided in raw TON format", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		rawWalletAddress := address.MustParseAddr(walletAddress).StringRaw()
+		now := time.Now()
+
+		seedUser(t, &entity.User{
+			TelegramUserID:   Int64Ptr(123456789),
+			TelegramUsername: "player_one",
+			WalletAddress:    walletAddress,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+
+		seedGame(t, &entity.Game{
+			GameID:                403,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      walletAddress,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    walletAddress,
+			InitTxHash:            "activity-403",
+			CreatedAt:             now,
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/my-active?wallet=%s", rawWalletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(body, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, "my-active", result["queue_key"])
+		assert.Equal(t, float64(1), result["total"])
+
+		summary := result["summary"].(map[string]interface{})
+		assert.Equal(t, float64(1), summary["my_active_count"])
+
+		items := result["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		game := item["game"].(map[string]interface{})
+		assert.Equal(t, float64(403), game["game_id"])
+	})
+
+	t.Run("should return reveal required queue for player hidden choice", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		now := time.Now()
+		joinedAt := now.Add(-2 * time.Minute)
+		playerTwoChoice := entity.CoinSideClosed
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                501,
+			Status:                entity.GameStatusWaitingForOpenBids,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &otherWallet,
+			PlayerOneChoice:       entity.CoinSideClosed,
+			PlayerTwoChoice:       &playerTwoChoice,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "activity-501",
+			CreatedAt:             now.Add(-10 * time.Minute),
+			JoinedAt:              &joinedAt,
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/reveal-required?wallet=%s", walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(body, &result)
+		require.NoError(t, err)
+
+		assert.Equal(t, "reveal-required", result["queue_key"])
+		assert.Equal(t, float64(1), result["total"])
+
+		items := result["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		assert.Equal(t, "reveal", item["next_action"])
+		assert.Equal(t, true, item["requires_attention"])
+	})
+
+	t.Run("should create expired claim and reflect resumable expired-attention state", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		now := time.Now()
+		completedAt := now.Add(-2 * time.Minute)
+		playerTwoChoice := entity.CoinSideTails
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                601,
+			Status:                entity.GameStatusEnded,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &otherWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			PlayerTwoChoice:       &playerTwoChoice,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "expired-601",
+			CreatedAt:             now.Add(-20 * time.Minute),
+			CompletedAt:           &completedAt,
+		})
+
+		postReq := httptest.NewRequest(
+			"POST",
+			"/api/v1/games/601/expired-claim",
+			strings.NewReader(fmt.Sprintf(`{"wallet_address":"%s"}`, walletAddress)),
+		)
+		postReq.Header.Set("Content-Type", "application/json")
+		postResp, err := app.Test(postReq)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusCreated, postResp.StatusCode)
+
+		body, err := io.ReadAll(postResp.Body)
+		require.NoError(t, err)
+
+		var createResult map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &createResult))
+		claim := createResult["claim"].(map[string]interface{})
+		assert.Equal(t, float64(601), claim["game_id"])
+		assert.Equal(t, walletAddress, claim["wallet_address"])
+
+		queueReq := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/expired-attention?wallet=%s", walletAddress), nil)
+		queueResp, err := app.Test(queueReq)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, queueResp.StatusCode)
+
+		queueBody, err := io.ReadAll(queueResp.Body)
+		require.NoError(t, err)
+
+		var queueResult map[string]interface{}
+		require.NoError(t, json.Unmarshal(queueBody, &queueResult))
+		items := queueResult["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		assert.Equal(t, "resume_review_result", item["next_action"])
+		claims := item["active_claims"].([]interface{})
+		require.Len(t, claims, 1)
+		activeClaim := claims[0].(map[string]interface{})
+		assert.Equal(t, "expired_follow_up", activeClaim["claim_type"])
+
+		otherReq := httptest.NewRequest(
+			"POST",
+			"/api/v1/games/601/expired-claim",
+			strings.NewReader(fmt.Sprintf(`{"wallet_address":"%s"}`, otherWallet)),
+		)
+		otherReq.Header.Set("Content-Type", "application/json")
+		otherResp, err := app.Test(otherReq)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusConflict, otherResp.StatusCode)
+
+		deleteReq := httptest.NewRequest(
+			"DELETE",
+			"/api/v1/games/601/expired-claim",
+			strings.NewReader(fmt.Sprintf(`{"wallet_address":"%s"}`, walletAddress)),
+		)
+		deleteReq.Header.Set("Content-Type", "application/json")
+		deleteResp, err := app.Test(deleteReq)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusNoContent, deleteResp.StatusCode)
+
+		getReq := httptest.NewRequest("GET", "/api/v1/games/601/expired-claim", nil)
+		getResp, err := app.Test(getReq)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusNoContent, getResp.StatusCode)
+	})
+}
+
+func TestSearchGameActivity(t *testing.T) {
+	t.Run("should search visible activity by game id", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		now := time.Now()
+		completedAt := now.Add(-time.Minute)
+		playerTwoChoice := entity.CoinSideTails
+		winnerAddress := walletAddress
+		payoutAmount := int64(1900000000)
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                701,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      otherWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    walletAddress,
+			InitTxHash:            "search-701",
+			CreatedAt:             now,
+		})
+
+		seedGame(t, &entity.Game{
+			GameID:                702,
+			Status:                entity.GameStatusPaid,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &otherWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			PlayerTwoChoice:       &playerTwoChoice,
+			WinnerAddress:         &winnerAddress,
+			PayoutAmount:          &payoutAmount,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "search-702",
+			CreatedAt:             now.Add(-20 * time.Minute),
+			CompletedAt:           &completedAt,
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/search?q=702&wallet=%s", walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &result))
+
+		assert.Equal(t, "702", result["query"])
+		assert.Equal(t, float64(1), result["total"])
+		items := result["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		assert.Equal(t, "history", item["queue_key"])
+		game := item["game"].(map[string]interface{})
+		assert.Equal(t, float64(702), game["game_id"])
+
+		summary := result["summary"].(map[string]interface{})
+		assert.Equal(t, float64(1), summary["joinable_count"])
+		assert.Equal(t, float64(1), summary["history_count"])
+	})
+
+	t.Run("should filter activity search by queue scope", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		now := time.Now()
+		playerTwoChoice := entity.CoinSideClosed
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                703,
+			Status:                entity.GameStatusWaitingForOpenBids,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &otherWallet,
+			PlayerOneChoice:       entity.CoinSideClosed,
+			PlayerTwoChoice:       &playerTwoChoice,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "search-703",
+			CreatedAt:             now.Add(-10 * time.Minute),
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/games/activity/search?q=%s&wallet=%s&queue=reveal-required", otherWallet, walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &result))
+
+		assert.Equal(t, "reveal-required", result["queue_scope"])
+		assert.Equal(t, float64(1), result["total"])
+		items := result["items"].([]interface{})
+		require.Len(t, items, 1)
+		item := items[0].(map[string]interface{})
+		assert.Equal(t, "reveal-required", item["queue_key"])
+	})
+
+	t.Run("should return empty result with helpful message when query is blank", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		req := httptest.NewRequest("GET", "/api/v1/games/activity/search", nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &result))
+
+		assert.Equal(t, float64(0), result["total"])
+		assert.Contains(t, result["message"], "Enter a wallet")
+		items := result["items"].([]interface{})
+		assert.Empty(t, items)
+	})
+
+	t.Run("should reject invalid queue scope", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		req := httptest.NewRequest("GET", "/api/v1/games/activity/search?q=701&queue=mystery", nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
+}
+
+func TestUserActivitySummary(t *testing.T) {
+	t.Run("should return queue counts for the requested wallet", func(t *testing.T) {
+		app := setupTestApp(t)
+		defer cleanupTestDB(t)
+
+		walletAddress := "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2"
+		otherWallet := "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"
+		thirdWallet := "EQBL8Ww6LLn6lYI6YJ6xntrENcGukdxbYlR5cYsEMFihZlyV"
+		now := time.Now()
+		joinedAt := now.Add(-5 * time.Minute)
+		completedAt := now.Add(-2 * time.Minute)
+		playerTwoChoiceClosed := entity.CoinSideClosed
+		playerTwoChoiceTails := entity.CoinSideTails
+		winnerAddress := walletAddress
+		payoutAmount := int64(1900000000)
+
+		for _, user := range []*entity.User{
+			{
+				TelegramUserID:   Int64Ptr(123456789),
+				TelegramUsername: "player_one",
+				WalletAddress:    walletAddress,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(987654321),
+				TelegramUsername: "player_two",
+				WalletAddress:    otherWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+			{
+				TelegramUserID:   Int64Ptr(111222333),
+				TelegramUsername: "player_three",
+				WalletAddress:    thirdWallet,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			},
+		} {
+			seedUser(t, user)
+		}
+
+		seedGame(t, &entity.Game{
+			GameID:                801,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      otherWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1000000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    thirdWallet,
+			InitTxHash:            "summary-801",
+			CreatedAt:             now.Add(-30 * time.Minute),
+		})
+
+		seedGame(t, &entity.Game{
+			GameID:                802,
+			Status:                entity.GameStatusWaitingForOpponent,
+			PlayerOneAddress:      walletAddress,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			BetAmount:             1200000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "summary-802",
+			CreatedAt:             now.Add(-25 * time.Minute),
+		})
+
+		seedGame(t, &entity.Game{
+			GameID:                803,
+			Status:                entity.GameStatusWaitingForOpenBids,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &otherWallet,
+			PlayerOneChoice:       entity.CoinSideClosed,
+			PlayerTwoChoice:       &playerTwoChoiceClosed,
+			BetAmount:             1300000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    thirdWallet,
+			InitTxHash:            "summary-803",
+			CreatedAt:             now.Add(-20 * time.Minute),
+			JoinedAt:              &joinedAt,
+		})
+
+		seedGame(t, &entity.Game{
+			GameID:                804,
+			Status:                entity.GameStatusPaid,
+			PlayerOneAddress:      walletAddress,
+			PlayerTwoAddress:      &thirdWallet,
+			PlayerOneChoice:       entity.CoinSideHeads,
+			PlayerTwoChoice:       &playerTwoChoiceTails,
+			WinnerAddress:         &winnerAddress,
+			PayoutAmount:          &payoutAmount,
+			BetAmount:             1400000000,
+			ServiceFeeNumerator:   100,
+			ReferrerFeeNumerator:  50,
+			WaitingTimeoutSeconds: 3600,
+			LowestBidAllowed:      100000000,
+			HighestBidAllowed:     10000000000,
+			FeeReceiverAddress:    otherWallet,
+			InitTxHash:            "summary-804",
+			CreatedAt:             now.Add(-2 * time.Hour),
+			CompletedAt:           &completedAt,
+		})
+
+		req := httptest.NewRequest("GET", fmt.Sprintf("/api/v1/users/%s/activity-summary", walletAddress), nil)
+		resp, err := app.Test(req)
+
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		require.NoError(t, json.Unmarshal(body, &result))
+
+		assert.Equal(t, walletAddress, result["wallet_address"])
+		assert.Equal(t, float64(1), result["joinable_count"])
+		assert.Equal(t, float64(1), result["my_active_count"])
+		assert.Equal(t, float64(1), result["reveal_required_count"])
+		assert.Equal(t, float64(0), result["expired_attention_count"])
+		assert.Equal(t, float64(1), result["history_count"])
+		assert.NotEmpty(t, result["last_activity_at"])
+	})
 }
 
 func cleanupTestDB(t *testing.T) {

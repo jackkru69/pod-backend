@@ -214,3 +214,34 @@ func TestBroadcastReservationEvents_IncludeTimestamp(t *testing.T) {
 		assert.NoError(t, err)
 	}
 }
+
+func TestBroadcastExpiredClaimEvents_IncludeTimestamp(t *testing.T) {
+	ctx := context.Background()
+	broadcastUC := usecase.NewGameBroadcastUseCase()
+	conn := &mockBroadcastConn{}
+
+	broadcastUC.Subscribe(ctx, 321, "expired-client", conn)
+
+	claim := &entity.ExpiredClaim{
+		GameID:        321,
+		WalletAddress: "EQD4FPq-PRDieyQKkizFTRtSDyucUIqrj0v_zXJmqaDp6_0t",
+		CreatedAt:     time.Now(),
+		ExpiresAt:     time.Now().Add(2 * time.Minute),
+		Status:        entity.ExpiredClaimStatusActive,
+	}
+
+	require.NoError(t, broadcastUC.BroadcastExpiredClaimCreated(ctx, claim))
+	require.NoError(t, broadcastUC.BroadcastExpiredClaimReleased(ctx, claim.GameID, "resolved"))
+	require.Len(t, conn.messages, 2)
+
+	for _, rawMessage := range conn.messages {
+		var payload struct {
+			Type      string `json:"type"`
+			Timestamp string `json:"timestamp"`
+		}
+		require.NoError(t, json.Unmarshal(rawMessage, &payload))
+		assert.NotEmpty(t, payload.Type)
+		_, err := time.Parse(time.RFC3339Nano, payload.Timestamp)
+		assert.NoError(t, err)
+	}
+}
