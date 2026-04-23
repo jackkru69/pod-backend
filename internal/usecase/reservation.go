@@ -7,11 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog/log"
-	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/repository"
+
+	"github.com/rs/zerolog/log"
+	"github.com/xssnick/tonutils-go/address"
 )
 
 // ReservationUseCase handles game reservation business logic.
@@ -32,9 +33,10 @@ type ReservationUseCase struct {
 	mu sync.RWMutex
 
 	// Dependencies
-	gameRepo    repository.GameRepository
-	broadcastUC *GameBroadcastUseCase
-	metrics     *metrics.ReservationMetrics // T049: Prometheus metrics
+	gameRepo            repository.GameRepository
+	broadcastUC         *GameBroadcastUseCase
+	cancelReservationUC *CancelReservationUseCase
+	metrics             *metrics.ReservationMetrics // T049: Prometheus metrics
 
 	// Cleanup control
 	stopCleanup chan struct{}
@@ -88,6 +90,13 @@ func (uc *ReservationUseCase) SetMetrics(m *metrics.ReservationMetrics) {
 	uc.metrics = m
 }
 
+// SetCancelReservationUseCase wires creator-side cancel coordination into join
+// reservation validation so stale join attempts are rejected while cancellation
+// is in progress.
+func (uc *ReservationUseCase) SetCancelReservationUseCase(cancelUC *CancelReservationUseCase) {
+	uc.cancelReservationUC = cancelUC
+}
+
 // Reserve creates a new reservation for a game.
 // Returns error if:
 // - Game is already reserved (ErrGameAlreadyReserved)
@@ -114,6 +123,19 @@ func (uc *ReservationUseCase) Reserve(ctx context.Context, gameID int64, walletA
 	// Check if player owns the game (FR-011)
 	if sameReservationWallet(game.PlayerOneAddress, normalizedWalletAddress) {
 		return nil, entity.ErrCannotReserveOwnGame
+	}
+
+	if uc.cancelReservationUC != nil {
+		cancelReservation, getErr := uc.cancelReservationUC.Get(ctx, gameID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if cancelReservation != nil && cancelReservation.IsActive() {
+			if uc.metrics != nil {
+				uc.metrics.RecordError("cancel_pending")
+			}
+			return nil, entity.ErrGameCancellationPending
+		}
 	}
 
 	// Lock for atomic reservation creation

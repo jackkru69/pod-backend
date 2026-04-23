@@ -7,16 +7,19 @@ import (
 	"sync"
 	"time"
 
+	"pod-backend/internal/entity"
+
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog/log"
-	"pod-backend/internal/entity"
 )
 
 // WebSocket message types for reservation events
 const (
-	MessageTypeReservationCreated  = "reservation_created"
-	MessageTypeReservationReleased = "reservation_released"
-	MessageTypeGameStateUpdate     = "game_state_update"
+	MessageTypeReservationCreated        = "reservation_created"
+	MessageTypeReservationReleased       = "reservation_released"
+	MessageTypeCancelReservationCreated  = "cancel_reservation_created"
+	MessageTypeCancelReservationReleased = "cancel_reservation_released"
+	MessageTypeGameStateUpdate           = "game_state_update"
 
 	// Reveal-phase reservation events (spec 005-reveal-reservation). Additive
 	// only; existing event envelopes are unchanged.
@@ -59,6 +62,23 @@ type ReservationReleasedEvent struct {
 	Timestamp string `json:"timestamp"`
 	GameID    int64  `json:"game_id"`
 	Reason    string `json:"reason"` // "expired", "cancelled", "joined"
+}
+
+// CancelReservationCreatedEvent is sent when cancel coordination is created.
+type CancelReservationCreatedEvent struct {
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	GameID     int64  `json:"game_id"`
+	ReservedBy string `json:"reserved_by"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// CancelReservationReleasedEvent is sent when cancel coordination ends.
+type CancelReservationReleasedEvent struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	GameID    int64  `json:"game_id"`
+	Reason    string `json:"reason"`
 }
 
 // RevealReservationCreatedEvent is sent when a reveal-phase reservation is
@@ -331,6 +351,31 @@ func (uc *GameBroadcastUseCase) BroadcastReservationCreated(ctx context.Context,
 func (uc *GameBroadcastUseCase) BroadcastReservationReleased(ctx context.Context, gameID int64, reason string) error {
 	event := ReservationReleasedEvent{
 		Type:      MessageTypeReservationReleased,
+		Timestamp: websocketTimestamp(time.Now()),
+		GameID:    gameID,
+		Reason:    reason,
+	}
+
+	return uc.broadcastEvent(ctx, gameID, event)
+}
+
+// BroadcastCancelReservationCreated sends a cancel-reservation created event.
+func (uc *GameBroadcastUseCase) BroadcastCancelReservationCreated(ctx context.Context, r *entity.CancelReservation) error {
+	event := CancelReservationCreatedEvent{
+		Type:       MessageTypeCancelReservationCreated,
+		Timestamp:  websocketTimestamp(time.Now()),
+		GameID:     r.GameID,
+		ReservedBy: r.WalletAddress,
+		ExpiresAt:  r.ExpiresAt.Format(time.RFC3339),
+	}
+
+	return uc.broadcastEvent(ctx, r.GameID, event)
+}
+
+// BroadcastCancelReservationReleased sends a cancel-reservation released event.
+func (uc *GameBroadcastUseCase) BroadcastCancelReservationReleased(ctx context.Context, gameID int64, reason string) error {
+	event := CancelReservationReleasedEvent{
+		Type:      MessageTypeCancelReservationReleased,
 		Timestamp: websocketTimestamp(time.Now()),
 		GameID:    gameID,
 		Reason:    reason,

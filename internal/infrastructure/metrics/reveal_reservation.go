@@ -1,3 +1,4 @@
+//nolint:dupl // This metric family intentionally mirrors the other advisory reservation/claim metrics with reveal-specific names.
 package metrics
 
 import (

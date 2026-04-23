@@ -22,6 +22,8 @@ const (
 	ActivityNextActionJoin              PlayerActivityNextAction = "join"
 	ActivityNextActionResumeJoin        PlayerActivityNextAction = "resume_join"
 	ActivityNextActionWaitForJoinWindow PlayerActivityNextAction = "wait_for_join_window"
+	ActivityNextActionResumeCancel      PlayerActivityNextAction = "resume_cancel"
+	ActivityNextActionWaitForCancel     PlayerActivityNextAction = "wait_for_cancel_resolution"
 	ActivityNextActionWaitForOpponent   PlayerActivityNextAction = "wait_for_opponent"
 	ActivityNextActionReveal            PlayerActivityNextAction = "reveal"
 	ActivityNextActionResumeReveal      PlayerActivityNextAction = "resume_reveal"
@@ -38,6 +40,7 @@ type ActionClaimType string
 
 const (
 	ActionClaimTypeJoin            ActionClaimType = "join"
+	ActionClaimTypeCancel          ActionClaimType = "cancel"
 	ActionClaimTypeReveal          ActionClaimType = "reveal"
 	ActionClaimTypeExpiredFollowUp ActionClaimType = "expired_follow_up"
 )

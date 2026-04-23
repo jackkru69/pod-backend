@@ -28,6 +28,27 @@ var (
 
 // Reveal-phase reservation errors (spec 005-reveal-reservation).
 var (
+	// ErrGameCancellationPending is returned when another session is actively cancelling the game.
+	ErrGameCancellationPending = errors.New("game is currently being cancelled")
+
+	// ErrCancelAlreadyReserved is returned when the cancel slot for a game is held by another session.
+	ErrCancelAlreadyReserved = errors.New("cancel is already reserved by another session")
+
+	// ErrCancelNotAvailable is returned when the game is not in waiting_for_opponent status.
+	ErrCancelNotAvailable = errors.New("game is not available for cancel reservation")
+
+	// ErrNotGameCreator is returned when the caller is not the creator of the game.
+	ErrNotGameCreator = errors.New("only the game creator can reserve cancel")
+
+	// ErrTooManyCancelReservations is returned when a wallet has reached the cancel-reservation limit.
+	ErrTooManyCancelReservations = errors.New("wallet has too many active cancel reservations")
+
+	// ErrCancelReservationNotFound is returned when no cancel reservation exists for the game.
+	ErrCancelReservationNotFound = errors.New("cancel reservation not found")
+
+	// ErrNotCancelReservationHolder is returned when a non-holder tries to cancel a cancel reservation.
+	ErrNotCancelReservationHolder = errors.New("only the cancel reservation holder can perform this action")
+
 	// ErrRevealAlreadyReserved is returned when the reveal slot for a game is held by another wallet.
 	ErrRevealAlreadyReserved = errors.New("reveal is already reserved by another player")
 

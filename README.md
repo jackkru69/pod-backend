@@ -24,8 +24,8 @@ and serving operational endpoints such as health checks, metrics, and Swagger.
 
 ## Backend Responsibilities
 
-- Serve REST API for games, reservations, user profiles, history, and referrals
-- Serve queue-oriented activity, search, activity-summary, and expired-follow-up claim surfaces
+- Serve REST API for games, reservations, cancel/reveal coordination, user profiles, history, and referrals
+- Serve queue-oriented activity, search, activity-summary, cancel/reveal coordination, and expired-follow-up claim surfaces
 - Serve WebSocket updates for global and per-game subscriptions
 - Subscribe to TON Center events and persist blockchain-derived state
 - Expose health, metrics, and Swagger/OpenAPI surfaces
@@ -157,6 +157,14 @@ CORS_ALLOWED_ORIGINS=https://localhost:5173,http://localhost:5173,https://t.me
 RATE_LIMIT_REQUESTS=100
 RATE_LIMIT_WINDOW=1m
 
+# Advisory coordination
+CANCEL_RESERVATION_TIMEOUT_SECONDS=60
+CANCEL_RESERVATION_MAX_PER_WALLET=3
+CANCEL_RESERVATION_CLEANUP_INTERVAL_SECONDS=5
+REVEAL_RESERVATION_TIMEOUT_SECONDS=90
+REVEAL_RESERVATION_MAX_PER_WALLET=10
+REVEAL_RESERVATION_CLEANUP_INTERVAL_SECONDS=5
+
 # Event source mode
 BLOCKCHAIN_EVENT_SOURCE=http
 ENABLE_WEBSOCKET=false
@@ -189,6 +197,10 @@ If you are running `pod-tma` locally, keep these aligned:
 - `GET /api/v1/games/:gameId/reservation`
 - `DELETE /api/v1/games/:gameId/reserve`
 - `GET /api/v1/reservations`
+- `POST /api/v1/games/:gameId/cancel-reserve`
+- `GET /api/v1/games/:gameId/cancel-reservation`
+- `DELETE /api/v1/games/:gameId/cancel-reserve`
+- `GET /api/v1/cancel-reservations`
 - `GET /api/v1/users/:address`
 - `GET /api/v1/users/:address/activity-summary`
 - `GET /api/v1/users/:address/history`
@@ -205,6 +217,8 @@ Server message families:
 - `game_state_update` — emitted by global and per-game subscriptions with a top-level RFC3339 `timestamp`
 - `reservation_created` — emitted when a reservation is acquired
 - `reservation_released` — emitted when a reservation expires, is cancelled, or is consumed by a join
+- `cancel_reservation_created` — emitted when a waiting-game cancel coordination is acquired by the creator
+- `cancel_reservation_released` — emitted when cancel coordination expires, is cancelled, or is released because authoritative progress made it irrelevant
 - `expired_claim_created` — emitted when an unresolved-game follow-up claim is acquired
 - `expired_claim_released` — emitted when an expired claim is cancelled, expires, or is released because the game became resolved
 - `sync_response` — returned only by `/ws/games/:gameId` after a client `sync_request`

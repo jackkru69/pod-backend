@@ -3,10 +3,11 @@ package rest
 import (
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/rs/zerolog"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog"
 )
 
 // RevealReservationHandler exposes the reveal-phase reservation endpoints
@@ -95,6 +96,8 @@ func revealReservationStatus(err error) (int, string) {
 // @Failure      404  {object}  ErrorResponse
 // @Failure      409  {object}  ErrorResponse
 // @Router       /api/v1/games/{gameId}/reveal-reserve [post]
+//
+//nolint:dupl // Mirrors the cancel-reservation handler by design to keep additive reservation-style APIs consistent.
 func (h *RevealReservationHandler) ReserveReveal(c *fiber.Ctx) error {
 	gameID, err := strconv.ParseInt(c.Params("gameId"), 10, 64)
 	if err != nil {
@@ -161,6 +164,8 @@ func (h *RevealReservationHandler) ReserveRevealBatch(c *fiber.Ctx) error {
 // @Success      204  "No reveal reservation exists"
 // @Failure      400  {object}  ErrorResponse
 // @Router       /api/v1/games/{gameId}/reveal-reservation [get]
+//
+//nolint:dupl // Mirrors the cancel-reservation read/list/cancel endpoints to preserve the shared API shape.
 func (h *RevealReservationHandler) GetRevealReservation(c *fiber.Ctx) error {
 	gameID, err := strconv.ParseInt(c.Params("gameId"), 10, 64)
 	if err != nil {

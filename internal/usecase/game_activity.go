@@ -11,7 +11,7 @@ import (
 	"pod-backend/internal/repository"
 )
 
-const activityClaimCapacity = 3
+const activityClaimCapacity = 4
 
 // GameActivityConfig controls queue pagination defaults for the additive
 // activity surfaces.
@@ -25,6 +25,7 @@ type GameActivityConfig struct {
 type GameActivityUseCase struct {
 	gameRepo            repository.GameRepository
 	reservationUC       *ReservationUseCase
+	cancelReservationUC *CancelReservationUseCase
 	revealReservationUC *RevealReservationUseCase
 	expiredClaimUC      *ExpiredClaimUseCase
 	config              GameActivityConfig
@@ -48,10 +49,17 @@ func NewGameActivityUseCase(
 	return &GameActivityUseCase{
 		gameRepo:            gameRepo,
 		reservationUC:       reservationUC,
+		cancelReservationUC: nil,
 		revealReservationUC: revealReservationUC,
 		expiredClaimUC:      expiredClaimUC,
 		config:              cfg,
 	}
+}
+
+// SetCancelReservationUseCase wires creator-side cancel coordination into the
+// additive activity shell without changing queue semantics.
+func (uc *GameActivityUseCase) SetCancelReservationUseCase(cancelUC *CancelReservationUseCase) {
+	uc.cancelReservationUC = cancelUC
 }
 
 // GetQueue returns the requested player-facing queue together with the summary
@@ -251,7 +259,9 @@ func (uc *GameActivityUseCase) buildJoinableItem(
 	nextAction := entity.ActivityNextActionJoin
 	requiresAttention := false
 
-	if claim := findClaim(claims, entity.ActionClaimTypeJoin); claim != nil {
+	if claim := findClaim(claims, entity.ActionClaimTypeCancel); claim != nil {
+		nextAction = entity.ActivityNextActionWaitForCancel
+	} else if claim := findClaim(claims, entity.ActionClaimTypeJoin); claim != nil {
 		if sameReservationWallet(claim.HolderWallet, normalizedWallet) {
 			nextAction = entity.ActivityNextActionResumeJoin
 			requiresAttention = true
@@ -291,8 +301,7 @@ func (uc *GameActivityUseCase) buildPlayerItem(
 	switch game.Status {
 	case entity.GameStatusWaitingForOpponent:
 		item.QueueKey = entity.ActivityQueueMyActive
-		item.NextAction = entity.ActivityNextActionWaitForOpponent
-		item.RequiresAttention = false
+		item.NextAction, item.RequiresAttention = resolveWaitingLobbyNextAction(claims, normalizedWallet)
 	case entity.GameStatusWaitingForOpenBids:
 		if playerNeedsReveal(game, normalizedWallet) {
 			item.QueueKey = entity.ActivityQueueRevealRequired
@@ -333,6 +342,23 @@ func (uc *GameActivityUseCase) loadClaims(ctx context.Context, gameID int64) ([]
 				Status:       entity.ActionClaimStatusActive,
 				CreatedAt:    reservation.CreatedAt,
 				ExpiresAt:    reservation.ExpiresAt,
+			})
+		}
+	}
+
+	if uc.cancelReservationUC != nil {
+		cancelReservation, err := uc.cancelReservationUC.Get(ctx, gameID)
+		if err != nil {
+			return nil, fmt.Errorf("get cancel reservation: %w", err)
+		}
+		if cancelReservation != nil && cancelReservation.IsActive() {
+			claims = append(claims, entity.ActionClaim{
+				ClaimType:    entity.ActionClaimTypeCancel,
+				GameID:       cancelReservation.GameID,
+				HolderWallet: cancelReservation.WalletAddress,
+				Status:       entity.ActionClaimStatusActive,
+				CreatedAt:    cancelReservation.CreatedAt,
+				ExpiresAt:    cancelReservation.ExpiresAt,
 			})
 		}
 	}
@@ -444,6 +470,22 @@ func resolveExpiredFollowUpNextAction(
 	}
 
 	return entity.ActivityNextActionWaitForReview, false
+}
+
+func resolveWaitingLobbyNextAction(
+	claims []entity.ActionClaim,
+	normalizedWallet string,
+) (entity.PlayerActivityNextAction, bool) {
+	claim := findClaim(claims, entity.ActionClaimTypeCancel)
+	if claim == nil {
+		return entity.ActivityNextActionWaitForOpponent, false
+	}
+
+	if sameReservationWallet(claim.HolderWallet, normalizedWallet) {
+		return entity.ActivityNextActionResumeCancel, true
+	}
+
+	return entity.ActivityNextActionWaitForCancel, false
 }
 
 func findClaim(

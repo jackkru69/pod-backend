@@ -10,10 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 	"pod-backend/config"
 	blockchainctrl "pod-backend/internal/controller/blockchain"
 	"pod-backend/internal/controller/http"
@@ -26,6 +22,11 @@ import (
 	"pod-backend/pkg/httpserver"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // Prometheus metrics (T059, T121)
@@ -93,7 +94,18 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		CleanupIntervalSeconds: cfg.Reservation.CleanupIntervalSeconds,
 	}
 	reservationUC := usecase.NewReservationUseCase(gameRepo, gameBroadcastUC, reservationCfg)
+	reservationUC.SetMetrics(metrics.NewReservationMetrics())
 	reservationUC.StartCleanupLoop(context.Background())
+
+	cancelReservationCfg := usecase.CancelReservationConfig{
+		MaxPerWallet:           cfg.CancelReservation.MaxPerWallet,
+		TimeoutSeconds:         cfg.CancelReservation.TimeoutSeconds,
+		CleanupIntervalSeconds: cfg.CancelReservation.CleanupIntervalSeconds,
+	}
+	cancelReservationUC := usecase.NewCancelReservationUseCase(gameRepo, reservationUC, gameBroadcastUC, cancelReservationCfg)
+	cancelReservationUC.SetMetrics(metrics.NewCancelReservationMetrics())
+	cancelReservationUC.StartCleanupLoop(context.Background())
+	reservationUC.SetCancelReservationUseCase(cancelReservationUC)
 
 	// Initialize reveal-phase reservation use case (spec 005-reveal-reservation)
 	revealReservationCfg := usecase.RevealReservationConfig{
@@ -118,6 +130,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		DefaultLimit: cfg.Activity.DefaultLimit,
 		MaxLimit:     cfg.Activity.MaxLimit,
 	})
+	gameActivityUC.SetCancelReservationUseCase(cancelReservationUC)
 
 	// Initialize TON Center client for blockchain monitoring and health checks
 	circuitBreakerTimeout, err := time.ParseDuration(cfg.GameBackend.CircuitBreakerTimeout)
@@ -143,6 +156,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 	gamePersistenceUC.SetTxManager(txManager)                          // Enable transactional operations for atomic updates
 	gamePersistenceUC.SetBroadcastUseCase(gameBroadcastUC)             // Wire WebSocket broadcasting
 	gamePersistenceUC.SetReservationUseCase(reservationUC)             // Consume reservations once a join lands on-chain
+	gamePersistenceUC.SetCancelReservationUseCase(cancelReservationUC) // Release cancel locks on authoritative game progress
 	gamePersistenceUC.SetRevealReservationUseCase(revealReservationUC) // Release reveal locks on terminal on-chain transitions (spec 005)
 	gamePersistenceUC.SetExpiredClaimUseCase(expiredClaimUC)           // Release expired follow-up claims once the game leaves ended state
 
@@ -207,6 +221,7 @@ func Run(cfg *config.Config) { //nolint: gocyclo,cyclop,funlen,gocritic,nolintli
 		GameQueryUC:         gameQueryUC,
 		GameActivityUC:      gameActivityUC,
 		ReservationUC:       reservationUC,
+		CancelReservationUC: cancelReservationUC,
 		RevealReservationUC: revealReservationUC,
 		ExpiredClaimUC:      expiredClaimUC,
 		UserManagementUC:    userManagementUC,

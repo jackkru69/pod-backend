@@ -20,6 +20,7 @@ type (
 		Swagger           Swagger
 		Activity          Activity
 		Reservation       Reservation
+		CancelReservation CancelReservation
 		RevealReservation RevealReservation
 		ExpiredClaim      ExpiredClaim
 		GameBackend       GameBackend
@@ -89,6 +90,13 @@ type (
 		TimeoutSeconds         int `env:"RESERVATION_TIMEOUT_SECONDS" envDefault:"60"`
 		MaxPerWallet           int `env:"RESERVATION_MAX_PER_WALLET" envDefault:"3"`
 		CleanupIntervalSeconds int `env:"RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
+	}
+
+	// RevealReservation - Reveal-phase reservation configuration (spec 005-reveal-reservation).
+	CancelReservation struct {
+		TimeoutSeconds         int `env:"CANCEL_RESERVATION_TIMEOUT_SECONDS" envDefault:"60"`
+		MaxPerWallet           int `env:"CANCEL_RESERVATION_MAX_PER_WALLET" envDefault:"3"`
+		CleanupIntervalSeconds int `env:"CANCEL_RESERVATION_CLEANUP_INTERVAL_SECONDS" envDefault:"5"`
 	}
 
 	// RevealReservation - Reveal-phase reservation configuration (spec 005-reveal-reservation).

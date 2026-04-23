@@ -20,6 +20,40 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/cancel-reservations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cancel-reservations"
+                ],
+                "summary": "List active cancel reservations for a wallet",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Wallet address",
+                        "name": "wallet",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.CancelReservationListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/games": {
             "get": {
                 "description": "Retrieve list of games filtered by status with pagination support",
@@ -272,6 +306,161 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/{gameId}/cancel-reservation": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cancel-reservations"
+                ],
+                "summary": "Get current cancel reservation for a game",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/rest.CancelReservationEnvelope"
+                        }
+                    },
+                    "204": {
+                        "description": "No cancel reservation exists"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/games/{gameId}/cancel-reserve": {
+            "post": {
+                "description": "Advisory creator-only lock that blocks conflicting join attempts while the creator confirms a cancel transaction.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cancel-reservations"
+                ],
+                "summary": "Reserve cancel coordination for a waiting game",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancel reservation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.CancelReserveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/rest.CancelReservationEnvelope"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "cancel-reservations"
+                ],
+                "summary": "Cancel a cancel reservation (holder-only)",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Game ID",
+                        "name": "gameId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Cancellation request with wallet address",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/rest.CancelReserveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Cancelled"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/rest.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/rest.ErrorResponse"
                         }
@@ -1206,11 +1395,13 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "join",
+                "cancel",
                 "reveal",
                 "expired_follow_up"
             ],
             "x-enum-varnames": [
                 "ActionClaimTypeJoin",
+                "ActionClaimTypeCancel",
                 "ActionClaimTypeReveal",
                 "ActionClaimTypeExpiredFollowUp"
             ]
@@ -1350,6 +1541,8 @@ const docTemplate = `{
                 "join",
                 "resume_join",
                 "wait_for_join_window",
+                "resume_cancel",
+                "wait_for_cancel_resolution",
                 "wait_for_opponent",
                 "reveal",
                 "resume_reveal",
@@ -1363,6 +1556,8 @@ const docTemplate = `{
                 "ActivityNextActionJoin",
                 "ActivityNextActionResumeJoin",
                 "ActivityNextActionWaitForJoinWindow",
+                "ActivityNextActionResumeCancel",
+                "ActivityNextActionWaitForCancel",
                 "ActivityNextActionWaitForOpponent",
                 "ActivityNextActionReveal",
                 "ActivityNextActionResumeReveal",
@@ -1454,6 +1649,56 @@ const docTemplate = `{
                 "updated_at": {
                     "type": "string"
                 },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.CancelReservationEnvelope": {
+            "type": "object",
+            "properties": {
+                "reservation": {
+                    "$ref": "#/definitions/rest.CancelReservationResponse"
+                }
+            }
+        },
+        "rest.CancelReservationListResponse": {
+            "type": "object",
+            "properties": {
+                "reservations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/rest.CancelReservationResponse"
+                    }
+                }
+            }
+        },
+        "rest.CancelReservationResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "game_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "wallet_address": {
+                    "type": "string"
+                }
+            }
+        },
+        "rest.CancelReserveRequest": {
+            "type": "object",
+            "required": [
+                "wallet_address"
+            ],
+            "properties": {
                 "wallet_address": {
                     "type": "string"
                 }

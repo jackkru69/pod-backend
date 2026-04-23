@@ -3,10 +3,11 @@ package rest
 import (
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/rs/zerolog"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog"
 )
 
 // ReservationHandler handles HTTP requests for game reservation endpoints
@@ -125,6 +126,11 @@ func (h *ReservationHandler) ReserveGame(c *fiber.Ctx) error {
 		case entity.ErrGameAlreadyReserved:
 			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
 				Error:   "conflict",
+				Message: err.Error(),
+			})
+		case entity.ErrGameCancellationPending:
+			return c.Status(fiber.StatusConflict).JSON(ErrorResponse{
+				Error:   "cancel_pending",
 				Message: err.Error(),
 			})
 		case entity.ErrTooManyReservations:

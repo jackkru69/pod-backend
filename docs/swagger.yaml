@@ -30,11 +30,13 @@ definitions:
   entity.ActionClaimType:
     enum:
     - join
+    - cancel
     - reveal
     - expired_follow_up
     type: string
     x-enum-varnames:
     - ActionClaimTypeJoin
+    - ActionClaimTypeCancel
     - ActionClaimTypeReveal
     - ActionClaimTypeExpiredFollowUp
   entity.ActivityQueueKey:
@@ -131,6 +133,8 @@ definitions:
     - join
     - resume_join
     - wait_for_join_window
+    - resume_cancel
+    - wait_for_cancel_resolution
     - wait_for_opponent
     - reveal
     - resume_reveal
@@ -144,6 +148,8 @@ definitions:
     - ActivityNextActionJoin
     - ActivityNextActionResumeJoin
     - ActivityNextActionWaitForJoinWindow
+    - ActivityNextActionResumeCancel
+    - ActivityNextActionWaitForCancel
     - ActivityNextActionWaitForOpponent
     - ActivityNextActionReveal
     - ActivityNextActionResumeReveal
@@ -209,6 +215,38 @@ definitions:
         type: string
       wallet_address:
         type: string
+    type: object
+  rest.CancelReservationEnvelope:
+    properties:
+      reservation:
+        $ref: '#/definitions/rest.CancelReservationResponse'
+    type: object
+  rest.CancelReservationListResponse:
+    properties:
+      reservations:
+        items:
+          $ref: '#/definitions/rest.CancelReservationResponse'
+        type: array
+    type: object
+  rest.CancelReservationResponse:
+    properties:
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      game_id:
+        type: integer
+      status:
+        type: string
+      wallet_address:
+        type: string
+    type: object
+  rest.CancelReserveRequest:
+    properties:
+      wallet_address:
+        type: string
+    required:
+    - wallet_address
     type: object
   rest.ErrorResponse:
     properties:
@@ -508,6 +546,28 @@ info:
   title: POD Game Backend API
   version: 1.0.0
 paths:
+  /api/v1/cancel-reservations:
+    get:
+      parameters:
+      - description: Wallet address
+        in: query
+        name: wallet
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.CancelReservationListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: List active cancel reservations for a wallet
+      tags:
+      - cancel-reservations
   /api/v1/games:
     get:
       consumes:
@@ -590,6 +650,110 @@ paths:
       summary: Get game details
       tags:
       - games
+  /api/v1/games/{gameId}/cancel-reservation:
+    get:
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/rest.CancelReservationEnvelope'
+        "204":
+          description: No cancel reservation exists
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Get current cancel reservation for a game
+      tags:
+      - cancel-reservations
+  /api/v1/games/{gameId}/cancel-reserve:
+    delete:
+      consumes:
+      - application/json
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Cancellation request with wallet address
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.CancelReserveRequest'
+      responses:
+        "204":
+          description: Cancelled
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Cancel a cancel reservation (holder-only)
+      tags:
+      - cancel-reservations
+    post:
+      consumes:
+      - application/json
+      description: Advisory creator-only lock that blocks conflicting join attempts
+        while the creator confirms a cancel transaction.
+      parameters:
+      - description: Game ID
+        in: path
+        minimum: 1
+        name: gameId
+        required: true
+        type: integer
+      - description: Cancel reservation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/rest.CancelReserveRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/rest.CancelReservationEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/rest.ErrorResponse'
+      summary: Reserve cancel coordination for a waiting game
+      tags:
+      - cancel-reservations
   /api/v1/games/{gameId}/expired-claim:
     delete:
       consumes:

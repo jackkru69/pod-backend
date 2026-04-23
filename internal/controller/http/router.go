@@ -4,11 +4,6 @@ package http
 import (
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/swagger"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog"
-	"github.com/valyala/fasthttp/fasthttpadaptor"
 	"pod-backend/config"
 	_ "pod-backend/docs" // Swagger docs.
 	blockchainctrl "pod-backend/internal/controller/blockchain"
@@ -22,6 +17,12 @@ import (
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/swagger"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 // RouterDeps contains all dependencies needed for the router
@@ -30,6 +31,7 @@ type RouterDeps struct {
 	GameQueryUC         *usecase.GameQueryUseCase
 	GameActivityUC      *usecase.GameActivityUseCase
 	ReservationUC       *usecase.ReservationUseCase
+	CancelReservationUC *usecase.CancelReservationUseCase
 	RevealReservationUC *usecase.RevealReservationUseCase
 	ExpiredClaimUC      *usecase.ExpiredClaimUseCase
 	UserManagementUC    *usecase.UserManagementUseCase
@@ -129,6 +131,14 @@ func NewRouter(app *fiber.App, cfg *config.Config, deps RouterDeps) {
 		apiV1Group.Get("/games/:gameId/reservation", reservationHandler.GetReservation)
 		apiV1Group.Delete("/games/:gameId/reserve", reservationHandler.CancelReservation)
 		apiV1Group.Get("/reservations", reservationHandler.ListReservationsByWallet)
+
+		if deps.CancelReservationUC != nil {
+			cancelHandler := rest.NewCancelReservationHandler(deps.CancelReservationUC, &zerologger)
+			apiV1Group.Post("/games/:gameId/cancel-reserve", cancelHandler.ReserveCancel)
+			apiV1Group.Get("/games/:gameId/cancel-reservation", cancelHandler.GetCancelReservation)
+			apiV1Group.Delete("/games/:gameId/cancel-reserve", cancelHandler.CancelCancelReservation)
+			apiV1Group.Get("/cancel-reservations", cancelHandler.ListCancelReservationsByWallet)
+		}
 
 		// Reveal-phase reservation endpoints (spec 005-reveal-reservation)
 		if deps.RevealReservationUC != nil {
