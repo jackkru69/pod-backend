@@ -4,6 +4,11 @@ package http
 import (
 	"net/http"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/swagger"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 	"pod-backend/config"
 	_ "pod-backend/docs" // Swagger docs.
 	blockchainctrl "pod-backend/internal/controller/blockchain"
@@ -17,12 +22,6 @@ import (
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
-
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/swagger"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog"
-	"github.com/valyala/fasthttp/fasthttpadaptor"
 )
 
 // RouterDeps contains all dependencies needed for the router

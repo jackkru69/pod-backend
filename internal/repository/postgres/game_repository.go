@@ -6,11 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Masterminds/squirrel"
-	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/repository"
 	"pod-backend/pkg/postgres"
+
+	"github.com/Masterminds/squirrel"
+	"github.com/xssnick/tonutils-go/address"
 )
 
 // Ensure GameRepository implements repository.GameRepository interface
@@ -51,6 +52,8 @@ func (r *GameRepository) Create(ctx context.Context, game *entity.Game) error {
 			"waiting_timeout_seconds",
 			"lowest_bid_allowed",
 			"highest_bid_allowed",
+			"min_referrer_payout_value",
+			"protocol_version",
 			"fee_receiver_address",
 			"joined_at",
 			"revealed_at",
@@ -77,6 +80,8 @@ func (r *GameRepository) Create(ctx context.Context, game *entity.Game) error {
 			game.WaitingTimeoutSeconds,
 			game.LowestBidAllowed,
 			game.HighestBidAllowed,
+			game.MinReferrerPayoutValue,
+			game.ProtocolVersion,
 			game.FeeReceiverAddress,
 			game.JoinedAt,
 			game.RevealedAt,
@@ -127,6 +132,8 @@ func (r *GameRepository) CreateOrIgnore(ctx context.Context, game *entity.Game) 
 			"waiting_timeout_seconds",
 			"lowest_bid_allowed",
 			"highest_bid_allowed",
+			"min_referrer_payout_value",
+			"protocol_version",
 			"fee_receiver_address",
 			"joined_at",
 			"revealed_at",
@@ -153,6 +160,8 @@ func (r *GameRepository) CreateOrIgnore(ctx context.Context, game *entity.Game) 
 			game.WaitingTimeoutSeconds,
 			game.LowestBidAllowed,
 			game.HighestBidAllowed,
+			game.MinReferrerPayoutValue,
+			game.ProtocolVersion,
 			game.FeeReceiverAddress,
 			game.JoinedAt,
 			game.RevealedAt,
@@ -185,7 +194,7 @@ func (r *GameRepository) GetByID(ctx context.Context, gameID int64) (*entity.Gam
 			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
 			"bet_amount", "winner_address", "payout_amount",
 			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
-			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"lowest_bid_allowed", "highest_bid_allowed", "min_referrer_payout_value", "protocol_version", "fee_receiver_address",
 			"created_at", "joined_at", "revealed_at", "completed_at",
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
@@ -202,7 +211,7 @@ func (r *GameRepository) GetByID(ctx context.Context, gameID int64) (*entity.Gam
 		&game.PlayerOneChoice, &game.PlayerTwoChoice, &game.PlayerOneReferrer, &game.PlayerTwoReferrer,
 		&game.BetAmount, &game.WinnerAddress, &game.PayoutAmount,
 		&game.ServiceFeeNumerator, &game.ReferrerFeeNumerator, &game.WaitingTimeoutSeconds,
-		&game.LowestBidAllowed, &game.HighestBidAllowed, &game.FeeReceiverAddress,
+		&game.LowestBidAllowed, &game.HighestBidAllowed, &game.MinReferrerPayoutValue, &game.ProtocolVersion, &game.FeeReceiverAddress,
 		&game.CreatedAt, &game.JoinedAt, &game.RevealedAt, &game.CompletedAt,
 		&game.InitTxHash, &game.JoinTxHash, &game.RevealTxHash, &game.CompleteTxHash,
 	)
@@ -221,7 +230,7 @@ func (r *GameRepository) GetByStatus(ctx context.Context, status int) ([]*entity
 			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
 			"bet_amount", "winner_address", "payout_amount",
 			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
-			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"lowest_bid_allowed", "highest_bid_allowed", "min_referrer_payout_value", "protocol_version", "fee_receiver_address",
 			"created_at", "joined_at", "revealed_at", "completed_at",
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
@@ -253,7 +262,7 @@ func (r *GameRepository) GetByStatuses(ctx context.Context, statuses []int) ([]*
 			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
 			"bet_amount", "winner_address", "payout_amount",
 			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
-			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"lowest_bid_allowed", "highest_bid_allowed", "min_referrer_payout_value", "protocol_version", "fee_receiver_address",
 			"created_at", "joined_at", "revealed_at", "completed_at",
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
@@ -281,7 +290,7 @@ func (r *GameRepository) GetByPlayerAddress(ctx context.Context, walletAddress s
 			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
 			"bet_amount", "winner_address", "payout_amount",
 			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
-			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"lowest_bid_allowed", "highest_bid_allowed", "min_referrer_payout_value", "protocol_version", "fee_receiver_address",
 			"created_at", "joined_at", "revealed_at", "completed_at",
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
@@ -318,7 +327,7 @@ func (r *GameRepository) GetByPlayerAndStatuses(ctx context.Context, walletAddre
 			"player_one_choice", "player_two_choice", "player_one_referrer", "player_two_referrer",
 			"bet_amount", "winner_address", "payout_amount",
 			"service_fee_numerator", "referrer_fee_numerator", "waiting_timeout_seconds",
-			"lowest_bid_allowed", "highest_bid_allowed", "fee_receiver_address",
+			"lowest_bid_allowed", "highest_bid_allowed", "min_referrer_payout_value", "protocol_version", "fee_receiver_address",
 			"created_at", "joined_at", "revealed_at", "completed_at",
 			"init_tx_hash", "join_tx_hash", "reveal_tx_hash", "complete_tx_hash",
 		).
@@ -402,7 +411,7 @@ func (r *GameRepository) queryGames(ctx context.Context, sql string, args ...int
 			&game.PlayerOneChoice, &game.PlayerTwoChoice, &game.PlayerOneReferrer, &game.PlayerTwoReferrer,
 			&game.BetAmount, &game.WinnerAddress, &game.PayoutAmount,
 			&game.ServiceFeeNumerator, &game.ReferrerFeeNumerator, &game.WaitingTimeoutSeconds,
-			&game.LowestBidAllowed, &game.HighestBidAllowed, &game.FeeReceiverAddress,
+			&game.LowestBidAllowed, &game.HighestBidAllowed, &game.MinReferrerPayoutValue, &game.ProtocolVersion, &game.FeeReceiverAddress,
 			&game.CreatedAt, &game.JoinedAt, &game.RevealedAt, &game.CompletedAt,
 			&game.InitTxHash, &game.JoinTxHash, &game.RevealTxHash, &game.CompleteTxHash,
 		)

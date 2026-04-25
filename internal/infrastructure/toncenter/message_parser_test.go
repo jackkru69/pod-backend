@@ -35,6 +35,26 @@ func TestRuntimeMessageParser_ParseInMsg_LegacyJSON(t *testing.T) {
 			},
 		},
 		{
+			name:  "parses remediated GameInitializedNotify config from legacy JSON",
+			inMsg: json.RawMessage(`{"event_type":"GameInitializedNotify","game_id":124,"player_one":"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2","bet_amount":"1000000000","service_fee_numerator":500,"referrer_fee_numerator":300,"waiting_for_open_bid_seconds":3600,"lowest_bid":"100000000","highest_bid":"100000000000","min_referrer_payout_value":"50000000","fee_receiver":"EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X","protocol_version":2}`),
+			assertMsg: func(t *testing.T, msg *ParsedMessage) {
+				t.Helper()
+				assert.Equal(t, "GameInitializedNotify", msg.EventType)
+				assert.Equal(t, int64(124), msg.GameID)
+				assert.Equal(t, uint32(500), msg.ServiceFeeNumerator)
+				assert.Equal(t, uint32(300), msg.ReferrerFeeNumerator)
+				assert.Equal(t, uint32(3600), msg.WaitingForOpenBidSeconds)
+				require.NotNil(t, msg.LowestBid)
+				assert.Equal(t, "100000000", msg.LowestBid.String())
+				require.NotNil(t, msg.HighestBid)
+				assert.Equal(t, "100000000000", msg.HighestBid.String())
+				require.NotNil(t, msg.MinReferrerPayoutValue)
+				assert.Equal(t, "50000000", msg.MinReferrerPayoutValue.String())
+				assert.Equal(t, "EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X", msg.FeeReceiver)
+				assert.Equal(t, uint32(2), msg.ProtocolVersion)
+			},
+		},
+		{
 			name:  "parses GameStartedNotify from legacy JSON",
 			inMsg: json.RawMessage(`{"event_type":"GameStartedNotify","game_id":456,"player_one":"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2","player_two":"EQBvW8Z5huBkMJYdnfAEM5JqTNLuuU3FYxrVjxFBzXn3r95X"}`),
 			assertMsg: func(t *testing.T, msg *ParsedMessage) {
@@ -166,6 +186,42 @@ func TestRuntimeMessageParser_ParseInMsg_UsesMsgDataBodyFallback(t *testing.T) {
 	assert.Equal(t, int64(456), msg.GameID)
 	assert.NotNil(t, msg.TotalGainings)
 	assert.Equal(t, "2000000000", msg.TotalGainings.String())
+}
+
+func TestRuntimeMessageParser_ParseInMsg_GameInitializedEventConfigSnapshot(t *testing.T) {
+	t.Parallel()
+
+	parser := NewRuntimeMessageParser()
+	builder := NewTestMessageBuilder()
+	feeReceiver := "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c"
+	messageBase64 := builder.BuildGameInitializedEventWithConfig(
+		124,
+		"EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+		1000000000,
+		feeReceiver,
+		123456,
+	)
+
+	inMsg := json.RawMessage(`{
+		"@type": "raw.message",
+		"msg_data": {"@type": "msg.dataRaw", "body": "` + messageBase64 + `"}
+	}`)
+
+	msg, err := parser.ParseInMsg(inMsg)
+	require.NoError(t, err)
+	assert.Equal(t, EventTypeGameInitialized, msg.EventType)
+	assert.Equal(t, int64(124), msg.GameID)
+	assert.Equal(t, uint32(500), msg.ServiceFeeNumerator)
+	assert.Equal(t, uint32(300), msg.ReferrerFeeNumerator)
+	assert.Equal(t, uint32(3600), msg.WaitingForOpenBidSeconds)
+	require.NotNil(t, msg.LowestBid)
+	assert.Equal(t, "100000000", msg.LowestBid.String())
+	require.NotNil(t, msg.HighestBid)
+	assert.Equal(t, "100000000000", msg.HighestBid.String())
+	require.NotNil(t, msg.MinReferrerPayoutValue)
+	assert.Equal(t, "50000000", msg.MinReferrerPayoutValue.String())
+	assert.Equal(t, feeReceiver, msg.FeeReceiver)
+	assert.Equal(t, uint32(2), msg.ProtocolVersion)
 }
 
 func TestRuntimeMessageParser_ParseInMsg_RejectsOverflowingUint256GameID(t *testing.T) {

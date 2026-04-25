@@ -12,6 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/config"
 	httpRouter "pod-backend/internal/controller/http"
 	"pod-backend/internal/entity"
@@ -19,11 +23,6 @@ import (
 	"pod-backend/internal/usecase"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
-
-	"github.com/gofiber/fiber/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/xssnick/tonutils-go/address"
 )
 
 // TestGETGames tests the GET /api/v1/games endpoint

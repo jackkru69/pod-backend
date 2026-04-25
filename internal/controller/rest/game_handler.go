@@ -4,10 +4,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/rs/zerolog"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/usecase"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog"
 )
 
 // GameHandler handles HTTP requests for game endpoints
@@ -28,7 +29,7 @@ func NewGameHandler(gameQueryUC *usecase.GameQueryUseCase, reservationUC *usecas
 
 // ListGames godoc
 // @Summary Get available games
-// @Description Retrieve list of games filtered by status with pagination support
+// @Description Retrieve list of games filtered by status with pagination support. Game payloads may include remediated factory config/protocol fields projected from on-chain events; reservation data is advisory and on-chain status remains authoritative.
 // @Tags games
 // @Accept json
 // @Produce json
@@ -105,7 +106,7 @@ func (h *GameHandler) ListGames(c *fiber.Ctx) error {
 
 // GetGameByID godoc
 // @Summary Get game details
-// @Description Retrieve detailed information for a specific game by ID
+// @Description Retrieve detailed information for a specific game by ID, including projected remediated factory config/protocol fields when available. Backend read models are indexed views of on-chain state.
 // @Tags games
 // @Accept json
 // @Produce json

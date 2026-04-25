@@ -222,6 +222,32 @@ func (b *TestMessageBuilder) BuildGameInitializedEvent(gameID int64, playerOne s
 	return base64.StdEncoding.EncodeToString(boc)
 }
 
+// BuildGameInitializedEventWithConfig creates a remediated factory-emitted
+// GameInitializedEvent message containing config/protocol snapshot fields.
+func (b *TestMessageBuilder) BuildGameInitializedEventWithConfig(gameID int64, playerOne string, bidValue int64, feeReceiver string, timestamp uint32) string {
+	builder := cell.BeginCell()
+	builder.MustStoreUInt(uint64(OpcodeGameInitializedEvent), 32)
+	builder.MustStoreBigUInt(big.NewInt(gameID), 256)
+	builder.MustStoreAddr(b.parseOrDefaultAddress(playerOne))
+	builder.MustStoreBigCoins(big.NewInt(bidValue))
+	builder.MustStoreUInt(500, 32)
+	builder.MustStoreUInt(300, 32)
+	builder.MustStoreUInt(3600, 32)
+	builder.MustStoreBigCoins(big.NewInt(100000000))
+
+	configRef := cell.BeginCell()
+	configRef.MustStoreBigCoins(big.NewInt(100000000000))
+	configRef.MustStoreBigCoins(big.NewInt(50000000))
+	configRef.MustStoreAddr(b.parseOrDefaultAddress(feeReceiver))
+	configRef.MustStoreUInt(2, 32)
+	configRef.MustStoreUInt(uint64(timestamp), 32)
+	builder.MustStoreRef(configRef.EndCell())
+
+	c := builder.EndCell()
+	boc := c.ToBOC()
+	return base64.StdEncoding.EncodeToString(boc)
+}
+
 // BuildGameStartedEvent creates a BOC-encoded factory-emitted GameStartedEvent message.
 func (b *TestMessageBuilder) BuildGameStartedEvent(gameID int64, playerOne, playerTwo string, totalGainings int64, timestamp uint32) string {
 	builder := cell.BeginCell()

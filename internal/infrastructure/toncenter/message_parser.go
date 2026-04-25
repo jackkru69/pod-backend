@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/xssnick/tonutils-go/address"
@@ -50,20 +51,28 @@ const (
 
 // ParsedMessage represents a parsed TON message from blockchain.
 type ParsedMessage struct {
-	Opcode        uint32
-	EventType     string
-	GameID        int64
-	PlayerOne     string
-	PlayerTwo     string
-	BidValue      *big.Int
-	TotalGainings *big.Int
-	Winner        string
-	Looser        string
-	Player        string
-	CoinSide      uint8
-	Required      *big.Int
-	Actual        *big.Int
-	RawData       []byte
+	Opcode                   uint32
+	EventType                string
+	GameID                   int64
+	PlayerOne                string
+	PlayerTwo                string
+	BidValue                 *big.Int
+	TotalGainings            *big.Int
+	Winner                   string
+	Looser                   string
+	Player                   string
+	CoinSide                 uint8
+	Required                 *big.Int
+	Actual                   *big.Int
+	ServiceFeeNumerator      uint32
+	ReferrerFeeNumerator     uint32
+	WaitingForOpenBidSeconds uint32
+	LowestBid                *big.Int
+	HighestBid               *big.Int
+	MinReferrerPayoutValue   *big.Int
+	FeeReceiver              string
+	ProtocolVersion          uint32
+	RawData                  []byte
 }
 
 // InMsgParser decodes TON Center in_msg payloads into structured game events.
@@ -183,11 +192,12 @@ func parseLegacyParsedMessage(inMsgJSON json.RawMessage) (*ParsedMessage, error)
 	}
 
 	for key, target := range map[string]*string{
-		"player_one": &msg.PlayerOne,
-		"player_two": &msg.PlayerTwo,
-		"winner":     &msg.Winner,
-		"looser":     &msg.Looser,
-		"player":     &msg.Player,
+		"player_one":   &msg.PlayerOne,
+		"player_two":   &msg.PlayerTwo,
+		"winner":       &msg.Winner,
+		"looser":       &msg.Looser,
+		"player":       &msg.Player,
+		"fee_receiver": &msg.FeeReceiver,
 	} {
 		if value, ok := data[key].(string); ok {
 			*target = value
@@ -196,11 +206,65 @@ func parseLegacyParsedMessage(inMsgJSON json.RawMessage) (*ParsedMessage, error)
 	if betAmount, ok := data["bet_amount"].(string); ok {
 		msg.BidValue, _ = new(big.Int).SetString(betAmount, 10)
 	}
+	if lowestBid, ok := parseLegacyBigInt(data, "lowest_bid"); ok {
+		msg.LowestBid = lowestBid
+	}
+	if highestBid, ok := parseLegacyBigInt(data, "highest_bid"); ok {
+		msg.HighestBid = highestBid
+	}
+	if minReferrerPayoutValue, ok := parseLegacyBigInt(data, "min_referrer_payout_value"); ok {
+		msg.MinReferrerPayoutValue = minReferrerPayoutValue
+	}
 	if coinSide, ok := data["coin_side"].(float64); ok {
 		msg.CoinSide = uint8(coinSide)
 	}
+	if serviceFeeNumerator, ok := parseLegacyUint32(data, "service_fee_numerator"); ok {
+		msg.ServiceFeeNumerator = serviceFeeNumerator
+	}
+	if referrerFeeNumerator, ok := parseLegacyUint32(data, "referrer_fee_numerator"); ok {
+		msg.ReferrerFeeNumerator = referrerFeeNumerator
+	}
+	if waitingForOpenBidSeconds, ok := parseLegacyUint32(data, "waiting_for_open_bid_seconds"); ok {
+		msg.WaitingForOpenBidSeconds = waitingForOpenBidSeconds
+	}
+	if protocolVersion, ok := parseLegacyUint32(data, "protocol_version"); ok {
+		msg.ProtocolVersion = protocolVersion
+	}
 
 	return msg, nil
+}
+
+func parseLegacyBigInt(data map[string]interface{}, key string) (*big.Int, bool) {
+	value, ok := data[key]
+	if !ok {
+		return nil, false
+	}
+
+	switch v := value.(type) {
+	case string:
+		parsed, ok := new(big.Int).SetString(v, 10)
+		return parsed, ok
+	case float64:
+		return big.NewInt(int64(v)), true
+	case int64:
+		return big.NewInt(v), true
+	case int:
+		return big.NewInt(int64(v)), true
+	default:
+		return nil, false
+	}
+}
+
+func parseLegacyUint32(data map[string]interface{}, key string) (uint32, bool) {
+	value, ok := parseLegacyBigInt(data, key)
+	if !ok || !value.IsUint64() {
+		return 0, false
+	}
+	parsed := value.Uint64()
+	if parsed > math.MaxUint32 {
+		return 0, false
+	}
+	return uint32(parsed), true
 }
 
 // parseLegacyJSON handles the legacy JSON format used in tests.

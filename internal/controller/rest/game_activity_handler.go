@@ -5,11 +5,10 @@ import (
 	"strconv"
 	"time"
 
-	"pod-backend/internal/entity"
-	"pod-backend/internal/usecase"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/usecase"
 )
 
 const (

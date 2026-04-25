@@ -140,6 +140,13 @@ func extractInt64(data map[string]interface{}, key string) (int64, error) {
 	}
 }
 
+func extractOptionalInt64(data map[string]interface{}, key string, defaultValue int64) (int64, error) {
+	if _, ok := data[key]; !ok {
+		return defaultValue, nil
+	}
+	return extractInt64(data, key)
+}
+
 // extractString extracts a string from event data.
 func extractString(data map[string]interface{}, key string) (string, error) {
 	val, ok := data[key]
@@ -151,6 +158,13 @@ func extractString(data map[string]interface{}, key string) (string, error) {
 		return "", fmt.Errorf("invalid type for %s: expected string, got %T", key, val)
 	}
 	return str, nil
+}
+
+func extractOptionalString(data map[string]interface{}, key string, defaultValue string) (string, error) {
+	if _, ok := data[key]; !ok {
+		return defaultValue, nil
+	}
+	return extractString(data, key)
 }
 
 // serializeEventData converts EventData to JSON string for Payload field.
@@ -226,6 +240,39 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 		playerOneChoice = parsedChoice
 	}
 
+	serviceFeeNumerator, err := extractOptionalInt64(event.EventData, "service_fee_numerator", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	referrerFeeNumerator, err := extractOptionalInt64(event.EventData, "referrer_fee_numerator", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	waitingTimeoutSeconds, err := extractOptionalInt64(event.EventData, "waiting_for_open_bid_seconds", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	lowestBidAllowed, err := extractOptionalInt64(event.EventData, "lowest_bid", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	highestBidAllowed, err := extractOptionalInt64(event.EventData, "highest_bid", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	minReferrerPayoutValue, err := extractOptionalInt64(event.EventData, "min_referrer_payout_value", 0)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	feeReceiverAddress, err := extractOptionalString(event.EventData, "fee_receiver", "")
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+	protocolVersion, err := extractOptionalInt64(event.EventData, "protocol_version", 1)
+	if err != nil {
+		return fmt.Errorf("invalid event data: %w", err)
+	}
+
 	// Ensure player_one user exists (for FK constraint satisfaction)
 	// This creates a minimal "blockchain-only" user if they don't exist yet
 	if err := uc.userRepo.EnsureUserByWallet(ctx, playerOne); err != nil {
@@ -234,13 +281,21 @@ func (uc *GamePersistenceUseCase) HandleGameInitialized(ctx context.Context, eve
 
 	// Create game entity
 	game := &entity.Game{
-		GameID:           gameID,
-		Status:           entity.GameStatusWaitingForOpponent,
-		PlayerOneAddress: playerOne,
-		PlayerOneChoice:  int(playerOneChoice),
-		BetAmount:        betAmount,
-		InitTxHash:       event.TransactionHash,
-		CreatedAt:        event.Timestamp,
+		GameID:                 gameID,
+		Status:                 entity.GameStatusWaitingForOpponent,
+		PlayerOneAddress:       playerOne,
+		PlayerOneChoice:        int(playerOneChoice),
+		BetAmount:              betAmount,
+		ServiceFeeNumerator:    serviceFeeNumerator,
+		ReferrerFeeNumerator:   referrerFeeNumerator,
+		WaitingTimeoutSeconds:  waitingTimeoutSeconds,
+		LowestBidAllowed:       lowestBidAllowed,
+		HighestBidAllowed:      highestBidAllowed,
+		MinReferrerPayoutValue: minReferrerPayoutValue,
+		ProtocolVersion:        protocolVersion,
+		FeeReceiverAddress:     feeReceiverAddress,
+		InitTxHash:             event.TransactionHash,
+		CreatedAt:              event.Timestamp,
 	}
 
 	// CRITICAL: Persist game FIRST (FK constraint requirement)

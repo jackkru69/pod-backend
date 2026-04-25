@@ -7,12 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
+	"github.com/xssnick/tonutils-go/address"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/repository"
-
-	"github.com/rs/zerolog/log"
-	"github.com/xssnick/tonutils-go/address"
 )
 
 // ReservationUseCase handles game reservation business logic.

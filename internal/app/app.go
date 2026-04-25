@@ -10,6 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"pod-backend/config"
 	blockchainctrl "pod-backend/internal/controller/blockchain"
 	"pod-backend/internal/controller/http"
@@ -22,11 +26,6 @@ import (
 	"pod-backend/pkg/httpserver"
 	"pod-backend/pkg/logger"
 	"pod-backend/pkg/postgres"
-
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 // Prometheus metrics (T059, T121)

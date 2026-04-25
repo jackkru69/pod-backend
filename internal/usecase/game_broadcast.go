@@ -7,10 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"pod-backend/internal/entity"
-
 	"github.com/gofiber/websocket/v2"
 	"github.com/rs/zerolog/log"
+	"pod-backend/internal/entity"
 )
 
 // WebSocket message types for reservation events

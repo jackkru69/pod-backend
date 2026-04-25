@@ -25,31 +25,33 @@ const (
 // Game represents a single coin flip gambling game instance.
 // Tracks full game lifecycle from initialization through completion/cancellation.
 type Game struct {
-	GameID                int64      `json:"game_id"`
-	Status                int        `json:"status"` // 0-4 (see constants above)
-	PlayerOneAddress      string     `json:"player_one_address"`
-	PlayerTwoAddress      *string    `json:"player_two_address,omitempty"`
-	PlayerOneChoice       int        `json:"player_one_choice"` // 1=CLOSED, 2=HEADS, 3=TAILS
-	PlayerTwoChoice       *int       `json:"player_two_choice,omitempty"`
-	PlayerOneReferrer     *string    `json:"player_one_referrer,omitempty"`
-	PlayerTwoReferrer     *string    `json:"player_two_referrer,omitempty"`
-	BetAmount             int64      `json:"bet_amount"` // nanotons
-	WinnerAddress         *string    `json:"winner_address,omitempty"`
-	PayoutAmount          *int64     `json:"payout_amount,omitempty"`
-	ServiceFeeNumerator   int64      `json:"service_fee_numerator"`
-	ReferrerFeeNumerator  int64      `json:"referrer_fee_numerator"`
-	WaitingTimeoutSeconds int64      `json:"waiting_timeout_seconds"`
-	LowestBidAllowed      int64      `json:"lowest_bid_allowed"`
-	HighestBidAllowed     int64      `json:"highest_bid_allowed"`
-	FeeReceiverAddress    string     `json:"fee_receiver_address"`
-	CreatedAt             time.Time  `json:"created_at"`
-	JoinedAt              *time.Time `json:"joined_at,omitempty"`
-	RevealedAt            *time.Time `json:"revealed_at,omitempty"`
-	CompletedAt           *time.Time `json:"completed_at,omitempty"`
-	InitTxHash            string     `json:"init_tx_hash"`
-	JoinTxHash            *string    `json:"join_tx_hash,omitempty"`
-	RevealTxHash          *string    `json:"reveal_tx_hash,omitempty"`
-	CompleteTxHash        *string    `json:"complete_tx_hash,omitempty"`
+	GameID                 int64      `json:"game_id"`
+	Status                 int        `json:"status"` // 0-4 (see constants above)
+	PlayerOneAddress       string     `json:"player_one_address"`
+	PlayerTwoAddress       *string    `json:"player_two_address,omitempty"`
+	PlayerOneChoice        int        `json:"player_one_choice"` // 1=CLOSED, 2=HEADS, 3=TAILS
+	PlayerTwoChoice        *int       `json:"player_two_choice,omitempty"`
+	PlayerOneReferrer      *string    `json:"player_one_referrer,omitempty"`
+	PlayerTwoReferrer      *string    `json:"player_two_referrer,omitempty"`
+	BetAmount              int64      `json:"bet_amount"` // nanotons
+	WinnerAddress          *string    `json:"winner_address,omitempty"`
+	PayoutAmount           *int64     `json:"payout_amount,omitempty"`
+	ServiceFeeNumerator    int64      `json:"service_fee_numerator"`
+	ReferrerFeeNumerator   int64      `json:"referrer_fee_numerator"`
+	WaitingTimeoutSeconds  int64      `json:"waiting_timeout_seconds"`
+	LowestBidAllowed       int64      `json:"lowest_bid_allowed"`
+	HighestBidAllowed      int64      `json:"highest_bid_allowed"`
+	MinReferrerPayoutValue int64      `json:"min_referrer_payout_value"`
+	ProtocolVersion        int64      `json:"protocol_version"`
+	FeeReceiverAddress     string     `json:"fee_receiver_address"`
+	CreatedAt              time.Time  `json:"created_at"`
+	JoinedAt               *time.Time `json:"joined_at,omitempty"`
+	RevealedAt             *time.Time `json:"revealed_at,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	InitTxHash             string     `json:"init_tx_hash"`
+	JoinTxHash             *string    `json:"join_tx_hash,omitempty"`
+	RevealTxHash           *string    `json:"reveal_tx_hash,omitempty"`
+	CompleteTxHash         *string    `json:"complete_tx_hash,omitempty"`
 }
 
 // Validate validates the Game entity.

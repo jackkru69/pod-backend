@@ -6,11 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"pod-backend/internal/entity"
 	"pod-backend/internal/infrastructure/metrics"
 	"pod-backend/internal/repository"
-
-	"github.com/rs/zerolog/log"
 )
 
 // CancelReservationUseCase handles creator-only cancel coordination for waiting

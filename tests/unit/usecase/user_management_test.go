@@ -6,11 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"pod-backend/internal/entity"
-	"pod-backend/internal/usecase"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/usecase"
 )
 
 // TestCreateOrUpdateUser_Success tests successful user creation

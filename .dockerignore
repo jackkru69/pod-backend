@@ -12,6 +12,9 @@ bin
 .gitignore
 
 coverage.txt
+coverage/
+*.log*
+.env*
 
 docker-compose.yml
 

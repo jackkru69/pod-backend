@@ -56,7 +56,7 @@ const docTemplate = `{
         },
         "/api/v1/games": {
             "get": {
-                "description": "Retrieve list of games filtered by status with pagination support",
+                "description": "Retrieve list of games filtered by status with pagination support. Game payloads may include remediated factory config/protocol fields projected from on-chain events; reservation data is advisory and on-chain status remains authoritative.",
                 "consumes": [
                     "application/json"
                 ],
@@ -264,7 +264,7 @@ const docTemplate = `{
         },
         "/api/v1/games/{gameId}": {
             "get": {
-                "description": "Retrieve detailed information for a specific game by ID",
+                "description": "Retrieve detailed information for a specific game by ID, including projected remediated factory config/protocol fields when available. Backend read models are indexed views of on-chain state.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1460,6 +1460,9 @@ const docTemplate = `{
                 "lowest_bid_allowed": {
                     "type": "integer"
                 },
+                "min_referrer_payout_value": {
+                    "type": "integer"
+                },
                 "payout_amount": {
                     "type": "integer"
                 },
@@ -1481,6 +1484,9 @@ const docTemplate = `{
                 },
                 "player_two_referrer": {
                     "type": "string"
+                },
+                "protocol_version": {
+                    "type": "integer"
                 },
                 "referrer_fee_numerator": {
                     "type": "integer"

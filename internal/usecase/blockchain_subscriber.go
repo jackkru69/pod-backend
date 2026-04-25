@@ -306,6 +306,30 @@ func (uc *BlockchainSubscriberUseCase) parseTransaction(tx toncenter.Transaction
 	if parsedMsg.Actual != nil {
 		eventData["actual"] = parsedMsg.Actual.String()
 	}
+	if parsedMsg.ServiceFeeNumerator != 0 {
+		eventData["service_fee_numerator"] = parsedMsg.ServiceFeeNumerator
+	}
+	if parsedMsg.ReferrerFeeNumerator != 0 {
+		eventData["referrer_fee_numerator"] = parsedMsg.ReferrerFeeNumerator
+	}
+	if parsedMsg.WaitingForOpenBidSeconds != 0 {
+		eventData["waiting_for_open_bid_seconds"] = parsedMsg.WaitingForOpenBidSeconds
+	}
+	if parsedMsg.LowestBid != nil {
+		eventData["lowest_bid"] = parsedMsg.LowestBid.String()
+	}
+	if parsedMsg.HighestBid != nil {
+		eventData["highest_bid"] = parsedMsg.HighestBid.String()
+	}
+	if parsedMsg.MinReferrerPayoutValue != nil {
+		eventData["min_referrer_payout_value"] = parsedMsg.MinReferrerPayoutValue.String()
+	}
+	if parsedMsg.FeeReceiver != "" {
+		eventData["fee_receiver"] = parsedMsg.FeeReceiver
+	}
+	if parsedMsg.ProtocolVersion != 0 {
+		eventData["protocol_version"] = parsedMsg.ProtocolVersion
+	}
 
 	// Create GameEvent entity
 	// Note: BlockNumber is set to 0 as TON uses logical time (lt) for ordering

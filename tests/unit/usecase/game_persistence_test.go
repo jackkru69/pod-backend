@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"pod-backend/internal/entity"
+	"pod-backend/internal/usecase"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"pod-backend/internal/entity"
-	"pod-backend/internal/usecase"
 )
 
 const (
@@ -33,10 +34,18 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 		BlockNumber:     1000,
 		Timestamp:       time.Now(),
 		EventData: map[string]interface{}{
-			"game_id":           int64(123),
-			"player_one":        activityTestWallet,
-			"bet_amount":        int64(1000000000), // 1 TON
-			"player_one_choice": int64(1),          // CLOSED
+			"game_id":                      int64(123),
+			"player_one":                   activityTestWallet,
+			"bet_amount":                   int64(1000000000), // 1 TON
+			"player_one_choice":            int64(1),          // CLOSED
+			"service_fee_numerator":        int64(500),
+			"referrer_fee_numerator":       int64(300),
+			"waiting_for_open_bid_seconds": int64(3600),
+			"lowest_bid":                   "100000000",
+			"highest_bid":                  "100000000000",
+			"min_referrer_payout_value":    "50000000",
+			"fee_receiver":                 activityTestOtherPlayerWallet,
+			"protocol_version":             int64(2),
 		},
 	}
 
@@ -49,7 +58,15 @@ func TestHandleGameInitialized_Success(t *testing.T) {
 			g.Status == entity.GameStatusWaitingForOpponent &&
 			g.PlayerOneAddress == activityTestWallet &&
 			g.BetAmount == 1000000000 &&
-			g.PlayerOneChoice == 1
+			g.PlayerOneChoice == 1 &&
+			g.ServiceFeeNumerator == 500 &&
+			g.ReferrerFeeNumerator == 300 &&
+			g.WaitingTimeoutSeconds == 3600 &&
+			g.LowestBidAllowed == 100000000 &&
+			g.HighestBidAllowed == 100000000000 &&
+			g.MinReferrerPayoutValue == 50000000 &&
+			g.FeeReceiverAddress == activityTestOtherPlayerWallet &&
+			g.ProtocolVersion == 2
 	})).Return(true, nil)
 
 	// Expect event to be persisted - called SECOND

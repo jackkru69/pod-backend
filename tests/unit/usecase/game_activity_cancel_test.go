@@ -5,11 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"pod-backend/internal/entity"
-	"pod-backend/internal/usecase"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/usecase"
 )
 
 func TestGameActivityUseCase_CancelClaims(t *testing.T) {

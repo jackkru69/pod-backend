@@ -78,6 +78,8 @@ definitions:
         type: string
       lowest_bid_allowed:
         type: integer
+      min_referrer_payout_value:
+        type: integer
       payout_amount:
         type: integer
       player_one_address:
@@ -93,6 +95,8 @@ definitions:
         type: integer
       player_two_referrer:
         type: string
+      protocol_version:
+        type: integer
       referrer_fee_numerator:
         type: integer
       reveal_tx_hash:
@@ -572,7 +576,10 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve list of games filtered by status with pagination support
+      description: Retrieve list of games filtered by status with pagination support.
+        Game payloads may include remediated factory config/protocol fields projected
+        from on-chain events; reservation data is advisory and on-chain status remains
+        authoritative.
       parameters:
       - default: 1
         description: Filter by game status (0-4)
@@ -620,7 +627,9 @@ paths:
     get:
       consumes:
       - application/json
-      description: Retrieve detailed information for a specific game by ID
+      description: Retrieve detailed information for a specific game by ID, including
+        projected remediated factory config/protocol fields when available. Backend
+        read models are indexed views of on-chain state.
       parameters:
       - description: Game ID
         in: path

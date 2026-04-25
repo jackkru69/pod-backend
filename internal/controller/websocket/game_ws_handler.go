@@ -6,13 +6,14 @@ import (
 	"strconv"
 	"time"
 
+	"pod-backend/internal/entity"
+	"pod-backend/internal/repository"
+	"pod-backend/internal/usecase"
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
-	"pod-backend/internal/entity"
-	"pod-backend/internal/repository"
-	"pod-backend/internal/usecase"
 )
 
 // GameWebSocketHandler handles WebSocket connections for game updates.
@@ -35,7 +36,9 @@ type clientMessage struct {
 }
 
 // syncResponseMessage is emitted for per-game `sync_request` reconciliation.
-// Like broadcast payloads, it includes a top-level server timestamp.
+// Like broadcast payloads, it includes a top-level server timestamp. The nested
+// game object is the same additive REST/read-model shape, so remediated config
+// and protocol fields may appear without changing the frame type contract.
 type syncResponseMessage struct {
 	Type      string       `json:"type"`
 	Timestamp string       `json:"timestamp"`

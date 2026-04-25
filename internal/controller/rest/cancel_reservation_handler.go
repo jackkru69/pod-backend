@@ -3,11 +3,10 @@ package rest
 import (
 	"strconv"
 
-	"pod-backend/internal/entity"
-	"pod-backend/internal/usecase"
-
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
+	"pod-backend/internal/entity"
+	"pod-backend/internal/usecase"
 )
 
 // CancelReservationHandler exposes creator-only cancel-coordination endpoints.

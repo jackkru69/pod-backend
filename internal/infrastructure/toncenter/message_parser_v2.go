@@ -234,7 +234,79 @@ func (p *MessageParserV2) parseGameInitializedNotifyV2(msg *ParsedMessage, slice
 	}
 	msg.BidValue = bidValue
 
+	// Remediated factories append config/protocol fields. Tact stores the tail of
+	// the larger message in a reference, while legacy emitted events have exactly
+	// 32 bits left here (timestamp) and no refs.
+	if slice.BitsLeft() > 32 || slice.RefsNum() > 0 {
+		if err := parseGameInitializedConfigSnapshotV2(msg, slice, "GameInitializedNotify"); err != nil {
+			return nil, err
+		}
+	}
+
 	return msg, nil
+}
+
+func parseGameInitializedConfigSnapshotV2(msg *ParsedMessage, slice *cell.Slice, label string) error {
+	serviceFeeNumerator, err := slice.LoadUInt(32)
+	if err != nil {
+		return fmt.Errorf("%s: failed to read serviceFeeNumerator: %w", label, err)
+	}
+	msg.ServiceFeeNumerator = uint32(serviceFeeNumerator)
+
+	referrerFeeNumerator, err := slice.LoadUInt(32)
+	if err != nil {
+		return fmt.Errorf("%s: failed to read referrerFeeNumerator: %w", label, err)
+	}
+	msg.ReferrerFeeNumerator = uint32(referrerFeeNumerator)
+
+	waitingForOpenBidSeconds, err := slice.LoadUInt(32)
+	if err != nil {
+		return fmt.Errorf("%s: failed to read waitingForOpenBidSeconds: %w", label, err)
+	}
+	msg.WaitingForOpenBidSeconds = uint32(waitingForOpenBidSeconds)
+
+	lowestBid, err := slice.LoadBigCoins()
+	if err != nil {
+		return fmt.Errorf("%s: failed to read lowestBid: %w", label, err)
+	}
+	msg.LowestBid = lowestBid
+
+	ref, err := slice.LoadRef()
+	if err != nil {
+		return fmt.Errorf("%s: failed to read config ref: %w", label, err)
+	}
+
+	highestBid, err := ref.LoadBigCoins()
+	if err != nil {
+		return fmt.Errorf("%s: failed to read highestBid: %w", label, err)
+	}
+	msg.HighestBid = highestBid
+
+	minReferrerPayoutValue, err := ref.LoadBigCoins()
+	if err != nil {
+		return fmt.Errorf("%s: failed to read minReferrerPayoutValue: %w", label, err)
+	}
+	msg.MinReferrerPayoutValue = minReferrerPayoutValue
+
+	feeReceiver, err := ref.LoadAddr()
+	if err != nil {
+		return fmt.Errorf("%s: failed to read feeReceiver: %w", label, err)
+	}
+	msg.FeeReceiver = feeReceiver.String()
+
+	protocolVersion, err := ref.LoadUInt(32)
+	if err != nil {
+		return fmt.Errorf("%s: failed to read protocolVersion: %w", label, err)
+	}
+	msg.ProtocolVersion = uint32(protocolVersion)
+
+	if msg.Opcode == OpcodeGameInitializedEvent {
+		if _, err := ref.LoadUInt(32); err != nil {
+			return fmt.Errorf("%s: failed to read timestamp: %w", label, err)
+		}
+	}
+
+	return nil
 }
 
 // parseGameStartedNotifyV2 parses GameStartedNotify message.
@@ -454,8 +526,10 @@ func (p *MessageParserV2) parseGameInitializedEventV2(msg *ParsedMessage, slice 
 		return nil, err
 	}
 
-	if err := loadEmittedEventTimestamp(slice, "GameInitializedEvent"); err != nil {
-		return nil, err
+	if slice.BitsLeft() >= 32 {
+		if err := loadEmittedEventTimestamp(slice, "GameInitializedEvent"); err != nil {
+			return nil, err
+		}
 	}
 
 	return parsedMsg, nil
